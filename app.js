@@ -23,14 +23,28 @@ const scoreOLabel = document.querySelector("#score-o");
 const boardElement = document.querySelector("#game-board");
 const nextRoundButton = document.querySelector("#next-round");
 const resetScoreButton = document.querySelector("#reset-score");
-const cells = [...document.querySelectorAll("[data-cell]")];
+const sessionGameKicker = document.querySelector("#session-game-kicker");
+const gameSpaceNumber = document.querySelector("#game-space-number");
+const gameTitle = document.querySelector("#game-title");
+let cells = [];
 const playerCards = [...document.querySelectorAll("[data-player]")];
 
-const winningLines = [
-  [0, 1, 2], [3, 4, 5], [6, 7, 8],
-  [0, 3, 6], [1, 4, 7], [2, 5, 8],
-  [0, 4, 8], [2, 4, 6],
-];
+const games = {
+  classic: {
+    id: "classic",
+    title: "Крестики-нолики",
+    space: "Спейс 001",
+    size: 3,
+    winLength: 3,
+  },
+  five: {
+    id: "five",
+    title: "5 в ряд",
+    space: "Спейс 002",
+    size: 10,
+    winLength: 5,
+  },
+};
 
 let nickname = localStorage.getItem("genblox:nickname") || "guest";
 let clientId = sessionStorage.getItem("genblox:client-id");
@@ -54,6 +68,7 @@ let hostName = "";
 let pendingJoin = null;
 let pendingRequestId = "";
 let roomStarted = false;
+let activeGameId = "classic";
 let supabaseClient = null;
 let lobbyChannel = null;
 let roomChannel = null;
@@ -108,6 +123,8 @@ function lobbyPresence() {
     roomCode: activeRoomCode || null,
     visibility: roomVisibility,
     waiting: gameMode === "host" && !guestId,
+    gameId: activeGameId,
+    gameTitle: games[activeGameId].title,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -148,14 +165,17 @@ function renderPublicRoomsFromPresence() {
     const info = document.createElement("span");
     const title = document.createElement("strong");
     const meta = document.createElement("small");
-    title.textContent = `${room.nickname || "guest"} · ${room.roomCode}`;
-    meta.textContent = "1/2 игроков · ожидает";
+    title.textContent = `${room.gameTitle || "Спейс"} · ${room.nickname || "guest"}`;
+    meta.textContent = `${room.roomCode} · 1/2 игроков`;
     info.append(title, meta);
 
     const joinButton = document.createElement("button");
     joinButton.type = "button";
     joinButton.textContent = "Запрос";
-    joinButton.addEventListener("click", () => requestJoin(room.roomCode));
+    joinButton.addEventListener(
+      "click",
+      () => requestJoin(room.roomCode, room.gameId),
+    );
 
     item.append(info, joinButton);
     publicRoomList.append(item);
@@ -284,6 +304,7 @@ async function subscribeToRoom(code, role) {
       }
 
       gameMode = "guest";
+      configureGame(payload.gameId || activeGameId);
       hostName = payload.hostName || "Хост";
       roomStarted = true;
       nextRoundButton.disabled = true;
@@ -353,7 +374,33 @@ function generateRoomCode() {
   ).join("");
 }
 
-async function openSessionMenu() {
+function configureGame(gameId) {
+  activeGameId = games[gameId] ? gameId : "classic";
+  const game = games[activeGameId];
+  sessionGameKicker.textContent = game.title;
+  gameSpaceNumber.textContent = game.space;
+  gameTitle.textContent = game.title;
+  boardElement.setAttribute("aria-label", `Поле игры ${game.title}`);
+  boardElement.style.setProperty("--board-size", game.size);
+  boardElement.classList.toggle("is-large", game.size > 3);
+  boardElement.replaceChildren();
+
+  for (let index = 0; index < game.size * game.size; index += 1) {
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.dataset.cell = String(index);
+    cell.setAttribute("role", "gridcell");
+    cell.setAttribute("aria-label", `Клетка ${index + 1}`);
+    cell.addEventListener("click", playCell);
+    boardElement.append(cell);
+  }
+  cells = [...boardElement.querySelectorAll("[data-cell]")];
+  board = Array(game.size * game.size).fill("");
+  winningLine = null;
+}
+
+async function openSessionMenu(gameId = "classic") {
+  configureGame(gameId);
   setSessionError();
   sessionOptions.hidden = false;
   roomWaiting.hidden = true;
@@ -404,7 +451,7 @@ async function createRoom(visibility) {
   }
 }
 
-async function requestJoin(roomCode) {
+async function requestJoin(roomCode, gameId = null) {
   const code = String(roomCode || "").trim().toUpperCase();
   if (code.length !== 6) {
     setSessionError("Введи шестизначный код комнаты.");
@@ -419,6 +466,7 @@ async function requestJoin(roomCode) {
 
   try {
     await ensureLobby();
+    if (gameId && games[gameId]) configureGame(gameId);
     gameMode = "guest";
     activeRoomCode = code;
     pendingRequestId = crypto.randomUUID();
@@ -458,6 +506,7 @@ async function approveJoin() {
     requestId: pendingJoin.requestId,
     targetClientId: guestId,
     hostName: nickname,
+    gameId: activeGameId,
   });
   await broadcastState();
   pendingJoin = null;
@@ -479,6 +528,7 @@ async function denyJoin() {
 
 function statePayload() {
   return {
+    gameId: activeGameId,
     board,
     currentPlayer,
     round,
@@ -496,6 +546,9 @@ function broadcastState() {
 }
 
 function hydrateState(state) {
+  if (state.gameId && state.gameId !== activeGameId) {
+    configureGame(state.gameId);
+  }
   board = state.board;
   currentPlayer = state.currentPlayer;
   round = state.round;
@@ -511,9 +564,34 @@ function hydrateState(state) {
 }
 
 function findWinningLine() {
-  return winningLines.find(([a, b, c]) => (
-    board[a] && board[a] === board[b] && board[a] === board[c]
-  )) || null;
+  const { size, winLength } = games[activeGameId];
+  const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+
+  for (let row = 0; row < size; row += 1) {
+    for (let column = 0; column < size; column += 1) {
+      const mark = board[row * size + column];
+      if (!mark) continue;
+
+      for (const [deltaRow, deltaColumn] of directions) {
+        const line = [];
+        for (let step = 0; step < winLength; step += 1) {
+          const nextRow = row + deltaRow * step;
+          const nextColumn = column + deltaColumn * step;
+          if (
+            nextRow < 0 ||
+            nextRow >= size ||
+            nextColumn < 0 ||
+            nextColumn >= size
+          ) break;
+          const index = nextRow * size + nextColumn;
+          if (board[index] !== mark) break;
+          line.push(index);
+        }
+        if (line.length === winLength) return line;
+      }
+    }
+  }
+  return null;
 }
 
 function finishMove(player) {
@@ -531,7 +609,7 @@ function applyHostMove(index, expectedPlayer) {
   if (
     !Number.isInteger(index) ||
     index < 0 ||
-    index > 8 ||
+    index >= board.length ||
     roundFinished ||
     board[index] ||
     currentPlayer !== expectedPlayer
@@ -591,7 +669,7 @@ function renderGame() {
 function startRound(incrementRound = true) {
   if (gameMode === "guest") return;
   if (incrementRound) round += 1;
-  board = Array(9).fill("");
+  board = Array(games[activeGameId].size ** 2).fill("");
   roundFinished = false;
   winningLine = null;
   currentPlayer = round % 2 === 1 ? "X" : "O";
@@ -609,7 +687,7 @@ function resetScore() {
 function resetHostGame() {
   scores = { X: 0, O: 0 };
   round = 1;
-  board = Array(9).fill("");
+  board = Array(games[activeGameId].size ** 2).fill("");
   currentPlayer = "X";
   roundFinished = false;
   winningLine = null;
@@ -653,8 +731,8 @@ async function startLocalGame() {
   showDialog(gameDialog);
 }
 
-document.querySelectorAll("#open-space, #join-space").forEach((button) => {
-  button.addEventListener("click", openSessionMenu);
+document.querySelectorAll("[data-open-game]").forEach((button) => {
+  button.addEventListener("click", () => openSessionMenu(button.dataset.openGame));
 });
 document.querySelector("#create-public-room").addEventListener(
   "click",
@@ -725,7 +803,6 @@ document.querySelector("#close-game").addEventListener(
 );
 nextRoundButton.addEventListener("click", () => startRound(true));
 resetScoreButton.addEventListener("click", resetScore);
-cells.forEach((cell) => cell.addEventListener("click", playCell));
 
 [sessionDialog, profileDialog, gameDialog].forEach((dialog) => {
   dialog.addEventListener("click", (event) => {
@@ -746,11 +823,14 @@ roomCodeInput.addEventListener("keydown", (event) => {
 boardElement.addEventListener("keydown", (event) => {
   const activeIndex = cells.indexOf(document.activeElement);
   if (activeIndex === -1) return;
+  const boardSize = games[activeGameId].size;
   let nextIndex = activeIndex;
-  if (event.key === "ArrowRight") nextIndex = Math.min(activeIndex + 1, 8);
+  if (event.key === "ArrowRight") nextIndex = Math.min(activeIndex + 1, cells.length - 1);
   if (event.key === "ArrowLeft") nextIndex = Math.max(activeIndex - 1, 0);
-  if (event.key === "ArrowDown") nextIndex = Math.min(activeIndex + 3, 8);
-  if (event.key === "ArrowUp") nextIndex = Math.max(activeIndex - 3, 0);
+  if (event.key === "ArrowDown") {
+    nextIndex = Math.min(activeIndex + boardSize, cells.length - 1);
+  }
+  if (event.key === "ArrowUp") nextIndex = Math.max(activeIndex - boardSize, 0);
   if (nextIndex !== activeIndex) {
     event.preventDefault();
     cells[nextIndex].focus();
@@ -767,4 +847,5 @@ window.addEventListener("beforeunload", () => {
   }
 });
 
+configureGame("classic");
 renderGame();

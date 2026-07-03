@@ -79,7 +79,7 @@
 
         <div class="space-grid">
           <article class="space-card featured">
-            <button class="space-cover" id="open-space" type="button" aria-label="Открыть спейс Крестики-нолики">
+            <button class="space-cover" id="open-space" data-open-game="classic" type="button" aria-label="Открыть спейс Крестики-нолики">
               <span class="cover-grid" aria-hidden="true">
                 <i>×</i><i></i><i>○</i>
                 <i></i><i>×</i><i></i>
@@ -93,7 +93,7 @@
                 <h3>Крестики-нолики</h3>
                 <p>Классика на двоих · 3×3</p>
               </div>
-              <button class="join-button" id="join-space" type="button">
+              <button class="join-button" id="join-space" data-open-game="classic" type="button">
                 Играть <span>→</span>
               </button>
             </div>
@@ -104,17 +104,32 @@
             </footer>
           </article>
 
-          <article class="space-card locked" aria-label="Новый спейс появится скоро">
-            <div class="locked-cover">
-              <span>?</span>
-            </div>
+          <article class="space-card featured">
+            <button class="space-cover five-cover" data-open-game="five" type="button" aria-label="Открыть спейс 5 в ряд">
+              <span class="five-preview" aria-hidden="true">
+                <i>×</i><i>○</i><i></i><i></i><i></i>
+                <i></i><i>×</i><i>○</i><i></i><i></i>
+                <i></i><i></i><i>×</i><i>○</i><i></i>
+                <i></i><i></i><i></i><i>×</i><i>○</i>
+                <i></i><i></i><i></i><i></i><i>×</i>
+              </span>
+              <span class="play-badge" aria-hidden="true">▶</span>
+              <span class="new-tag alt-tag">Новый спейс</span>
+            </button>
             <div class="space-info">
               <div>
-                <h3>Новый спейс</h3>
-                <p>Уже строится...</p>
+                <h3>5 в ряд</h3>
+                <p>Большая доска · 10×10</p>
               </div>
-              <span class="soon-chip">Скоро</span>
+              <button class="join-button" data-open-game="five" type="button">
+                Играть <span>→</span>
+              </button>
             </div>
+            <footer class="space-meta">
+              <span><i class="status-dot"></i> Можно играть</span>
+              <span>👥 2 игрока</span>
+              <span>⚡ 5–15 мин</span>
+            </footer>
           </article>
         </div>
       </section>
@@ -129,8 +144,8 @@
       <div class="dialog-panel">
         <header class="game-header">
           <div>
-            <p class="section-kicker">Крестики-нолики</p>
-            <h2>Как будем играть?</h2>
+            <p class="section-kicker" id="session-game-kicker">Крестики-нолики</p>
+            <h2 id="session-game-title">Как будем играть?</h2>
           </div>
           <button class="close-button" data-close="session-dialog" type="button" aria-label="Закрыть">×</button>
         </header>
@@ -217,8 +232,8 @@
       <div class="game-shell">
         <header class="game-header">
           <div>
-            <p class="section-kicker">Спейс 001</p>
-            <h2>Крестики-нолики</h2>
+            <p class="section-kicker" id="game-space-number">Спейс 001</p>
+            <h2 id="game-title">Крестики-нолики</h2>
           </div>
           <button class="close-button" id="close-game" type="button" aria-label="Закрыть игру">×</button>
         </header>
@@ -238,17 +253,7 @@
         </div>
 
         <p class="game-status" id="game-status" aria-live="polite">Ход крестиков</p>
-        <div class="game-board" id="game-board" role="grid" aria-label="Поле крестиков-ноликов">
-          <button type="button" role="gridcell" data-cell="0" aria-label="Клетка 1"></button>
-          <button type="button" role="gridcell" data-cell="1" aria-label="Клетка 2"></button>
-          <button type="button" role="gridcell" data-cell="2" aria-label="Клетка 3"></button>
-          <button type="button" role="gridcell" data-cell="3" aria-label="Клетка 4"></button>
-          <button type="button" role="gridcell" data-cell="4" aria-label="Клетка 5"></button>
-          <button type="button" role="gridcell" data-cell="5" aria-label="Клетка 6"></button>
-          <button type="button" role="gridcell" data-cell="6" aria-label="Клетка 7"></button>
-          <button type="button" role="gridcell" data-cell="7" aria-label="Клетка 8"></button>
-          <button type="button" role="gridcell" data-cell="8" aria-label="Клетка 9"></button>
-        </div>
+        <div class="game-board" id="game-board" role="grid" aria-label="Игровое поле"></div>
 
         <div class="game-actions">
           <button class="secondary-button" id="reset-score" type="button">Сбросить счёт</button>

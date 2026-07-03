@@ -370,7 +370,7 @@ h1 em {
 
 .space-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(230px, 0.45fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
 }
 
@@ -444,6 +444,48 @@ h1 em {
 .cover-grid i:nth-child(3),
 .cover-grid i:nth-child(7) {
   color: var(--cyan);
+}
+
+.five-cover {
+  background:
+    radial-gradient(circle at 75% 25%, rgba(100, 220, 255, 0.38), transparent 30%),
+    linear-gradient(135deg, rgba(255, 102, 140, 0.45), transparent 55%),
+    linear-gradient(45deg, #29294c, #171625);
+}
+
+.five-preview {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, 34px);
+  grid-template-rows: repeat(5, 34px);
+  gap: 3px;
+  padding: 7px;
+  background: rgba(10, 9, 24, 0.55);
+  box-shadow: 16px 20px 0 rgba(0, 0, 0, 0.25);
+  transform: rotate(5deg);
+}
+
+.five-preview i {
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.13);
+  background: #28263f;
+  color: var(--pink);
+  font-size: 25px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.five-preview i:nth-child(2),
+.five-preview i:nth-child(8),
+.five-preview i:nth-child(14),
+.five-preview i:nth-child(20) {
+  color: var(--cyan);
+}
+
+.alt-tag {
+  background: var(--cyan);
 }
 
 .play-badge {
@@ -972,9 +1014,9 @@ h1 em {
 
 .game-board {
   display: grid;
-  grid-template-columns: repeat(3, minmax(70px, 112px));
+  grid-template-columns: repeat(var(--board-size, 3), minmax(0, var(--cell-size, 112px)));
   justify-content: center;
-  gap: 8px;
+  gap: var(--board-gap, 8px);
   margin: 0 auto;
 }
 
@@ -988,6 +1030,17 @@ h1 em {
   font-weight: 800;
   line-height: 1;
   transition: background 120ms ease, transform 120ms ease;
+}
+
+.game-board.is-large {
+  --cell-size: 48px;
+  --board-gap: 3px;
+}
+
+.game-board.is-large button {
+  border-width: 1px;
+  font-size: clamp(20px, 4vw, 32px);
+  box-shadow: inset -3px -3px rgba(0, 0, 0, 0.12);
 }
 
 .game-board button:hover:empty {
@@ -1066,6 +1119,10 @@ h1 em {
   .game-shell { padding: 20px 14px; }
   .dialog-panel { padding: 22px 16px; }
   .game-board { gap: 5px; }
+  .game-board.is-large {
+    --cell-size: min(8.3vw, 40px);
+    --board-gap: 2px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
