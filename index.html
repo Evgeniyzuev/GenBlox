@@ -199,7 +199,26 @@
         </div>
 
         <p class="game-status" id="game-status" aria-live="polite">Ход крестиков</p>
-        <div class="game-board" id="game-board" role="grid" aria-label="Игровое поле"></div>
+        <div class="battle-layout" id="battle-layout">
+          <section class="battle-field own-field" id="own-field" hidden>
+            <h3>Твоё поле</h3>
+            <div class="game-board is-large is-battle" id="own-board" role="grid" aria-label="Своё поле"></div>
+          </section>
+          <section class="battle-field target-field">
+            <h3 id="target-field-title" hidden>Поле противника</h3>
+            <div class="game-board" id="game-board" role="grid" aria-label="Игровое поле"></div>
+          </section>
+        </div>
+
+        <div class="placement-controls" id="placement-controls" hidden>
+          <p id="placement-status">Размести корабль</p>
+          <div>
+            <button class="secondary-button" id="rotate-ship" type="button">↻ Повернуть</button>
+            <button class="secondary-button" id="auto-place" type="button">Авто</button>
+            <button class="secondary-button" id="clear-fleet" type="button">Очистить</button>
+            <button class="primary-button" id="ready-fleet" type="button">Готов</button>
+          </div>
+        </div>
 
         <div class="game-actions">
           <button class="secondary-button" id="reset-score" type="button">Сбросить счёт</button>

@@ -1,20 +1,61 @@
-const fleet = [3, 2, 2, 1, 1];
+export const fleet = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1];
 
-function createFleet(size) {
+function placementCells(size, start, length, horizontal) {
+  const row = Math.floor(start / size);
+  const column = start % size;
+  if (horizontal && column + length > size) return null;
+  if (!horizontal && row + length > size) return null;
+  return Array.from({ length }, (_, offset) => (
+    horizontal ? start + offset : start + offset * size
+  ));
+}
+
+function touchesExisting(size, occupied, cells) {
+  const candidate = new Set(cells);
+  return cells.some((cell) => {
+    const row = Math.floor(cell / size);
+    const column = cell % size;
+    for (let rowOffset = -1; rowOffset <= 1; rowOffset += 1) {
+      for (let columnOffset = -1; columnOffset <= 1; columnOffset += 1) {
+        const nextRow = row + rowOffset;
+        const nextColumn = column + columnOffset;
+        if (
+          nextRow >= 0 &&
+          nextRow < size &&
+          nextColumn >= 0 &&
+          nextColumn < size
+        ) {
+          const neighbour = nextRow * size + nextColumn;
+          if (occupied.has(neighbour) && !candidate.has(neighbour)) return true;
+        }
+      }
+    }
+    return false;
+  });
+}
+
+export function tryPlaceShip(occupied, size, start, length, horizontal) {
+  const cells = placementCells(size, start, length, horizontal);
+  if (
+    !cells ||
+    cells.some((cell) => occupied.has(cell)) ||
+    touchesExisting(size, occupied, cells)
+  ) {
+    return null;
+  }
+  return cells;
+}
+
+export function createFleet(size) {
   const occupied = new Set();
 
   for (const length of fleet) {
     let placed = false;
     while (!placed) {
       const horizontal = Math.random() > 0.5;
-      const row = Math.floor(Math.random() * (horizontal ? size : size - length + 1));
-      const column = Math.floor(Math.random() * (horizontal ? size - length + 1 : size));
-      const cells = Array.from({ length }, (_, offset) => (
-        horizontal
-          ? row * size + column + offset
-          : (row + offset) * size + column
-      ));
-      if (cells.every((cell) => !occupied.has(cell))) {
+      const start = Math.floor(Math.random() * size * size);
+      const cells = tryPlaceShip(occupied, size, start, length, horizontal);
+      if (cells) {
         cells.forEach((cell) => occupied.add(cell));
         placed = true;
       }
@@ -23,17 +64,21 @@ function createFleet(size) {
   return occupied;
 }
 
-export function createBattle(size = 8) {
+export function createBattle(size = 10, playerFleet = null, opponentFleet = null) {
   return {
     size,
-    playerShips: createFleet(size),
-    botShips: createFleet(size),
+    playerShips: new Set(playerFleet || createFleet(size)),
+    botShips: new Set(opponentFleet || createFleet(size)),
     playerShots: new Set(),
     botShots: new Set(),
     turn: "player",
     winner: null,
     lastBotShot: null,
   };
+}
+
+export function isCompleteFleet(ships) {
+  return ships instanceof Set && ships.size === 20;
 }
 
 function fleetDestroyed(ships, shots) {
