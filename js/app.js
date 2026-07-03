@@ -1,3 +1,18 @@
+import {
+  findWinningLine as findLineWin,
+  games,
+  renderGameCatalog,
+} from "./games/catalog.js";
+import {
+  botShoot,
+  createBattle,
+  hydrateBattle,
+  opponentShoot,
+  playerShoot,
+  remainingDecks,
+  serializeBattle,
+} from "./games/battleship.js";
+
 const gameDialog = document.querySelector("#game-dialog");
 const sessionDialog = document.querySelector("#session-dialog");
 const profileDialog = document.querySelector("#profile-dialog");
@@ -26,25 +41,13 @@ const resetScoreButton = document.querySelector("#reset-score");
 const sessionGameKicker = document.querySelector("#session-game-kicker");
 const gameSpaceNumber = document.querySelector("#game-space-number");
 const gameTitle = document.querySelector("#game-title");
+const labelX = document.querySelector("#label-x");
+const labelO = document.querySelector("#label-o");
+const localModeTitle = document.querySelector("#local-mode-title");
+const localModeDescription = document.querySelector("#local-mode-description");
+const spaceGrid = document.querySelector("#space-grid");
 let cells = [];
 const playerCards = [...document.querySelectorAll("[data-player]")];
-
-const games = {
-  classic: {
-    id: "classic",
-    title: "Крестики-нолики",
-    space: "Спейс 001",
-    size: 3,
-    winLength: 3,
-  },
-  five: {
-    id: "five",
-    title: "5 в ряд",
-    space: "Спейс 002",
-    size: 10,
-    winLength: 5,
-  },
-};
 
 let nickname = localStorage.getItem("genblox:nickname") || "guest";
 let clientId = sessionStorage.getItem("genblox:client-id");
@@ -73,6 +76,7 @@ let supabaseClient = null;
 let lobbyChannel = null;
 let roomChannel = null;
 let lobbyPromise = null;
+let battleState = null;
 
 profileName.textContent = nickname;
 
@@ -314,6 +318,14 @@ async function subscribeToRoom(code, role) {
     .on("broadcast", { event: "move" }, ({ payload }) => {
       if (
         gameMode === "host" &&
+        games[activeGameId].type === "battle" &&
+        payload?.clientId === guestId
+      ) {
+        applyGuestBattleShot(Number(payload.index));
+        return;
+      }
+      if (
+        gameMode === "host" &&
         payload?.clientId === guestId &&
         currentPlayer === "O"
       ) {
@@ -377,12 +389,21 @@ function generateRoomCode() {
 function configureGame(gameId) {
   activeGameId = games[gameId] ? gameId : "classic";
   const game = games[activeGameId];
+  const isBattle = game.type === "battle";
   sessionGameKicker.textContent = game.title;
   gameSpaceNumber.textContent = game.space;
   gameTitle.textContent = game.title;
+  sessionError.textContent = "";
+  labelX.textContent = isBattle ? "Твой флот" : "Крестики";
+  labelO.textContent = isBattle ? "Флот бота" : "Нолики";
+  localModeTitle.textContent = isBattle ? "Против компьютера" : "На одном устройстве";
+  localModeDescription.textContent = isBattle
+    ? "Корабли расставятся автоматически"
+    : "Передавайте ход друг другу";
   boardElement.setAttribute("aria-label", `Поле игры ${game.title}`);
   boardElement.style.setProperty("--board-size", game.size);
   boardElement.classList.toggle("is-large", game.size > 3);
+  boardElement.classList.toggle("is-battle", isBattle);
   boardElement.replaceChildren();
 
   for (let index = 0; index < game.size * game.size; index += 1) {
@@ -397,6 +418,7 @@ function configureGame(gameId) {
   cells = [...boardElement.querySelectorAll("[data-cell]")];
   board = Array(game.size * game.size).fill("");
   winningLine = null;
+  battleState = isBattle ? createBattle(game.size) : null;
 }
 
 async function openSessionMenu(gameId = "classic") {
@@ -499,7 +521,14 @@ async function approveJoin() {
   gameHint.textContent = `Ты играешь крестиками · комната ${activeRoomCode}`;
   nextRoundButton.disabled = false;
   resetScoreButton.disabled = false;
-  resetHostGame();
+  if (games[activeGameId].type === "battle") {
+    scores = { X: 0, O: 0 };
+    round = 1;
+    battleState = createBattle(games[activeGameId].size);
+    renderBattle();
+  } else {
+    resetHostGame();
+  }
   await updateLobbyPresence();
   await sendRoomEvent("join_response", {
     approved: true,
@@ -538,6 +567,7 @@ function statePayload() {
     hostName: nickname,
     guestName,
     guestId,
+    battle: serializeBattle(battleState),
   };
 }
 
@@ -555,6 +585,7 @@ function hydrateState(state) {
   scores = state.scores;
   roundFinished = state.roundFinished;
   winningLine = state.winningLine;
+  battleState = hydrateBattle(state.battle);
   hostName = state.hostName || "Хост";
   guestName = state.guestName || nickname;
   playerNameX.textContent = hostName;
@@ -564,34 +595,7 @@ function hydrateState(state) {
 }
 
 function findWinningLine() {
-  const { size, winLength } = games[activeGameId];
-  const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
-
-  for (let row = 0; row < size; row += 1) {
-    for (let column = 0; column < size; column += 1) {
-      const mark = board[row * size + column];
-      if (!mark) continue;
-
-      for (const [deltaRow, deltaColumn] of directions) {
-        const line = [];
-        for (let step = 0; step < winLength; step += 1) {
-          const nextRow = row + deltaRow * step;
-          const nextColumn = column + deltaColumn * step;
-          if (
-            nextRow < 0 ||
-            nextRow >= size ||
-            nextColumn < 0 ||
-            nextColumn >= size
-          ) break;
-          const index = nextRow * size + nextColumn;
-          if (board[index] !== mark) break;
-          line.push(index);
-        }
-        if (line.length === winLength) return line;
-      }
-    }
-  }
-  return null;
+  return findLineWin(board, games[activeGameId]);
 }
 
 function finishMove(player) {
@@ -628,6 +632,10 @@ function applyLocalMove(index) {
 
 function playCell(event) {
   const index = Number(event.currentTarget.dataset.cell);
+  if (games[activeGameId].type === "battle") {
+    playBattleCell(index);
+    return;
+  }
   if (gameMode === "local") {
     applyLocalMove(index);
   } else if (gameMode === "host" && currentPlayer === "X") {
@@ -637,7 +645,115 @@ function playCell(event) {
   }
 }
 
+function playBattleCell(index) {
+  if (!battleState) return;
+
+  if (gameMode === "guest") {
+    if (battleState.turn === "bot") {
+      void sendRoomEvent("move", { clientId, index });
+    }
+    return;
+  }
+
+  if (!playerShoot(battleState, index)) return;
+  renderBattle();
+
+  if (battleState.winner === "player") {
+    scores.X += 1;
+    renderBattle();
+    if (gameMode === "host") void broadcastState();
+    return;
+  }
+
+  if (gameMode === "host") {
+    void broadcastState();
+    return;
+  }
+
+  setTimeout(() => {
+    botShoot(battleState);
+    if (battleState.winner === "bot") scores.O += 1;
+    renderBattle();
+  }, 350);
+}
+
+function applyGuestBattleShot(index) {
+  if (!battleState || !opponentShoot(battleState, index)) return;
+  if (battleState.winner === "bot") scores.O += 1;
+  renderBattle();
+  void broadcastState();
+}
+
+function renderBattle() {
+  if (!battleState) return;
+  roundLabel.textContent = round;
+  scoreXLabel.textContent = scores.X;
+  scoreOLabel.textContent = scores.O;
+  playerNameX.textContent = gameMode === "guest" ? hostName : nickname;
+  playerNameO.textContent = gameMode === "local" ? "Компьютер" : guestName || nickname;
+
+  const guestView = gameMode === "guest";
+  const targetShips = guestView ? battleState.playerShips : battleState.botShips;
+  const outgoingShots = guestView ? battleState.botShots : battleState.playerShots;
+  const ownShips = guestView ? battleState.botShips : battleState.playerShips;
+  const incomingShots = guestView ? battleState.playerShots : battleState.botShots;
+  const myTurn = gameMode === "local"
+    ? battleState.turn === "player"
+    : guestView
+      ? battleState.turn === "bot"
+      : battleState.turn === "player";
+
+  cells.forEach((cell, index) => {
+    const wasShot = outgoingShots.has(index);
+    const hit = wasShot && targetShips.has(index);
+    cell.textContent = hit ? "×" : wasShot ? "·" : "";
+    cell.className = hit ? "battle-hit" : wasShot ? "battle-miss" : "";
+    cell.disabled = wasShot || !myTurn || Boolean(battleState.winner);
+    cell.setAttribute(
+      "aria-label",
+      `Клетка ${index + 1}${hit ? ": попадание" : wasShot ? ": мимо" : ""}`,
+    );
+  });
+
+  playerCards.forEach((card) => {
+    card.classList.toggle(
+      "is-turn",
+      !battleState.winner &&
+      card.dataset.player === (battleState.turn === "player" ? "X" : "O"),
+    );
+  });
+
+  const playerDecks = remainingDecks(
+    ownShips,
+    incomingShots,
+  );
+  const botDecks = remainingDecks(
+    targetShips,
+    outgoingShots,
+  );
+  gameHint.textContent = `Твои палубы: ${playerDecks} · Палубы противника: ${botDecks}`;
+
+  const iWon = guestView
+    ? battleState.winner === "bot"
+    : battleState.winner === "player";
+  if (battleState.winner) {
+    statusLabel.textContent = iWon
+      ? "Вражеский флот потоплен!"
+      : "Твой флот потоплен";
+  } else if (!myTurn) {
+    statusLabel.textContent = gameMode === "local"
+      ? "Компьютер выбирает цель…"
+      : "Ход соперника…";
+  } else {
+    statusLabel.textContent = "Твой выстрел";
+  }
+}
+
 function renderGame() {
+  if (games[activeGameId].type === "battle") {
+    renderBattle();
+    return;
+  }
   roundLabel.textContent = round;
   scoreXLabel.textContent = scores.X;
   scoreOLabel.textContent = scores.O;
@@ -669,6 +785,12 @@ function renderGame() {
 function startRound(incrementRound = true) {
   if (gameMode === "guest") return;
   if (incrementRound) round += 1;
+  if (games[activeGameId].type === "battle") {
+    battleState = createBattle(games[activeGameId].size);
+    renderBattle();
+    if (gameMode === "host") void broadcastState();
+    return;
+  }
   board = Array(games[activeGameId].size ** 2).fill("");
   roundFinished = false;
   winningLine = null;
@@ -681,6 +803,12 @@ function resetScore() {
   if (gameMode === "guest") return;
   scores = { X: 0, O: 0 };
   round = 1;
+  if (games[activeGameId].type === "battle") {
+    battleState = createBattle(games[activeGameId].size);
+    renderBattle();
+    if (gameMode === "host") void broadcastState();
+    return;
+  }
   startRound(false);
 }
 
@@ -724,16 +852,18 @@ async function startLocalGame() {
   nextRoundButton.disabled = false;
   resetScoreButton.disabled = false;
   playerNameX.textContent = nickname;
-  playerNameO.textContent = "Игрок 2";
-  gameHint.textContent = "Сейчас играют двое за одним устройством";
+  playerNameO.textContent = games[activeGameId].type === "battle"
+    ? "Компьютер"
+    : "Игрок 2";
+  gameHint.textContent = games[activeGameId].type === "battle"
+    ? "Стреляй по клеткам поля противника"
+    : "Сейчас играют двое за одним устройством";
   resetScore();
   closeDialog(sessionDialog);
   showDialog(gameDialog);
 }
 
-document.querySelectorAll("[data-open-game]").forEach((button) => {
-  button.addEventListener("click", () => openSessionMenu(button.dataset.openGame));
-});
+renderGameCatalog(spaceGrid, openSessionMenu);
 document.querySelector("#create-public-room").addEventListener(
   "click",
   () => createRoom("public"),

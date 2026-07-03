@@ -16,7 +16,7 @@
     ></script>
     <script src="./config.js" defer></script>
     <script src="/api/config.js" defer></script>
-    <script src="./app.js" defer></script>
+    <script type="module" src="./js/app.js"></script>
   </head>
   <body>
     <div class="sky" aria-hidden="true">
@@ -74,64 +74,10 @@
             <p class="section-kicker">Доступно сейчас</p>
             <h2 id="spaces-title">Популярные спейсы</h2>
           </div>
-          <span class="online-pill"><i></i> 1 спейс онлайн</span>
+          <span class="online-pill"><i></i> 3 спейса доступны</span>
         </div>
 
-        <div class="space-grid">
-          <article class="space-card featured">
-            <button class="space-cover" id="open-space" data-open-game="classic" type="button" aria-label="Открыть спейс Крестики-нолики">
-              <span class="cover-grid" aria-hidden="true">
-                <i>×</i><i></i><i>○</i>
-                <i></i><i>×</i><i></i>
-                <i>○</i><i></i><i>×</i>
-              </span>
-              <span class="play-badge" aria-hidden="true">▶</span>
-              <span class="new-tag">Первый спейс</span>
-            </button>
-            <div class="space-info">
-              <div>
-                <h3>Крестики-нолики</h3>
-                <p>Классика на двоих · 3×3</p>
-              </div>
-              <button class="join-button" id="join-space" data-open-game="classic" type="button">
-                Играть <span>→</span>
-              </button>
-            </div>
-            <footer class="space-meta">
-              <span><i class="status-dot"></i> Можно играть</span>
-              <span>👥 2 игрока</span>
-              <span>⚡ 2–5 мин</span>
-            </footer>
-          </article>
-
-          <article class="space-card featured">
-            <button class="space-cover five-cover" data-open-game="five" type="button" aria-label="Открыть спейс 5 в ряд">
-              <span class="five-preview" aria-hidden="true">
-                <i>×</i><i>○</i><i></i><i></i><i></i>
-                <i></i><i>×</i><i>○</i><i></i><i></i>
-                <i></i><i></i><i>×</i><i>○</i><i></i>
-                <i></i><i></i><i></i><i>×</i><i>○</i>
-                <i></i><i></i><i></i><i></i><i>×</i>
-              </span>
-              <span class="play-badge" aria-hidden="true">▶</span>
-              <span class="new-tag alt-tag">Новый спейс</span>
-            </button>
-            <div class="space-info">
-              <div>
-                <h3>5 в ряд</h3>
-                <p>Большая доска · 10×10</p>
-              </div>
-              <button class="join-button" data-open-game="five" type="button">
-                Играть <span>→</span>
-              </button>
-            </div>
-            <footer class="space-meta">
-              <span><i class="status-dot"></i> Можно играть</span>
-              <span>👥 2 игрока</span>
-              <span>⚡ 5–15 мин</span>
-            </footer>
-          </article>
-        </div>
+        <div class="space-grid" id="space-grid"></div>
       </section>
     </main>
 
@@ -151,19 +97,19 @@
         </header>
 
         <div class="session-options" id="session-options">
-          <button class="session-option" id="create-public-room" type="button">
+          <button class="session-option" id="create-public-room" data-network-only type="button">
             <span class="option-icon">＋</span>
             <span><strong>Открытая комната</strong><small>Появится в списке доступных игр</small></span>
             <b>→</b>
           </button>
 
-          <button class="session-option" id="create-room" type="button">
+          <button class="session-option" id="create-room" data-network-only type="button">
             <span class="option-icon private-icon">#</span>
             <span><strong>Приватная комната</strong><small>Вход только по шестизначному коду</small></span>
             <b>→</b>
           </button>
 
-          <div class="join-option">
+          <div class="join-option" data-network-only>
             <label for="room-code">Подключиться к комнате</label>
             <div class="code-row">
               <input id="room-code" type="text" maxlength="6" autocomplete="off" placeholder="КОД123" />
@@ -172,7 +118,7 @@
             <small>Введи шестизначный код с экрана друга</small>
           </div>
 
-          <div class="public-rooms">
+          <div class="public-rooms" data-network-only>
             <div class="public-rooms-heading">
               <span>Открытые комнаты</span>
               <button id="refresh-rooms" type="button">Обновить</button>
@@ -184,7 +130,7 @@
 
           <button class="session-option compact" id="local-game" type="button">
             <span class="option-icon">⌨</span>
-            <span><strong>На одном устройстве</strong><small>Передавайте ход друг другу</small></span>
+            <span><strong id="local-mode-title">На одном устройстве</strong><small id="local-mode-description">Передавайте ход друг другу</small></span>
             <b>→</b>
           </button>
         </div>
@@ -241,13 +187,13 @@
         <div class="scoreboard" aria-label="Счёт игроков">
           <div class="player-card player-x is-turn" data-player="X">
             <span class="player-mark">×</span>
-            <span><small id="name-x">Игрок 1</small><strong>Крестики</strong></span>
+            <span><small id="name-x">Игрок 1</small><strong id="label-x">Крестики</strong></span>
             <b id="score-x">0</b>
           </div>
           <div class="round-label">Раунд <strong id="round-number">1</strong></div>
           <div class="player-card player-o" data-player="O">
             <span class="player-mark">○</span>
-            <span><small id="name-o">Игрок 2</small><strong>Нолики</strong></span>
+            <span><small id="name-o">Игрок 2</small><strong id="label-o">Нолики</strong></span>
             <b id="score-o">0</b>
           </div>
         </div>
