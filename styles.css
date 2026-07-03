@@ -583,6 +583,193 @@ h1 em {
   box-shadow: 0 30px 100px rgba(0, 0, 0, 0.7);
 }
 
+.menu-dialog {
+  width: min(560px, calc(100% - 24px));
+  padding: 0;
+  border: 1px solid rgba(183, 243, 74, 0.3);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #181728;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.7);
+}
+
+.menu-dialog::backdrop {
+  background: rgba(8, 7, 15, 0.84);
+  backdrop-filter: blur(8px);
+}
+
+.dialog-panel {
+  padding: 28px;
+}
+
+.session-options {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.session-option {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 15px;
+  border: 1px solid var(--line);
+  background: #25233a;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-option:hover {
+  border-color: var(--lime);
+  background: #2b293f;
+}
+
+.session-option > span:nth-child(2) {
+  display: grid;
+  gap: 4px;
+}
+
+.session-option small,
+.join-option small,
+.field-hint {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.option-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  background: rgba(183, 243, 74, 0.12);
+  color: var(--lime);
+  font-size: 25px;
+  font-weight: 900;
+}
+
+.session-option.compact .option-icon {
+  color: var(--purple);
+  background: rgba(142, 112, 255, 0.12);
+}
+
+.join-option {
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.join-option label,
+.nickname-field {
+  display: grid;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.code-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.code-row input,
+.nickname-field input {
+  min-width: 0;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  outline: 0;
+  background: #12111e;
+  color: white;
+  font: 800 16px "Rubik", system-ui, sans-serif;
+}
+
+.code-row input {
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.code-row input:focus,
+.nickname-field input:focus {
+  border-color: var(--lime);
+}
+
+.room-waiting {
+  padding: 28px 0 4px;
+  text-align: center;
+}
+
+.waiting-label {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.room-code-display {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 20px;
+  border: 2px dashed rgba(183, 243, 74, 0.45);
+  background: rgba(183, 243, 74, 0.06);
+  cursor: pointer;
+}
+
+.room-code-display strong {
+  color: var(--lime);
+  font-size: clamp(36px, 10vw, 56px);
+  letter-spacing: 8px;
+}
+
+.room-code-display small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.connection-status {
+  margin: 20px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.connection-status i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--lime);
+  box-shadow: 0 0 8px var(--lime);
+}
+
+.session-error {
+  min-height: 18px;
+  margin: 12px 0 0;
+  color: var(--pink);
+  font-size: 11px;
+  text-align: center;
+}
+
+.nickname-field {
+  margin-top: 24px;
+}
+
+.field-hint {
+  margin: 8px 0 18px;
+}
+
+.save-profile {
+  width: 100%;
+}
+
 .game-dialog::backdrop {
   background: rgba(8, 7, 15, 0.84);
   backdrop-filter: blur(8px);
@@ -781,6 +968,7 @@ h1 em {
   .space-info { align-items: end; padding: 16px; }
   .space-meta { flex-wrap: wrap; padding: 12px 16px; }
   .game-shell { padding: 20px 14px; }
+  .dialog-panel { padding: 22px 16px; }
   .game-board { gap: 5px; }
 }
 
