@@ -33,6 +33,12 @@ const winningLines = [
 ];
 
 let nickname = localStorage.getItem("genblox:nickname") || "guest";
+let clientId = sessionStorage.getItem("genblox:client-id");
+if (!clientId) {
+  clientId = crypto.randomUUID();
+  sessionStorage.setItem("genblox:client-id", clientId);
+}
+
 let board = Array(9).fill("");
 let currentPlayer = "X";
 let round = 1;
@@ -40,10 +46,18 @@ let scores = { X: 0, O: 0 };
 let roundFinished = false;
 let winningLine = null;
 let gameMode = "local";
-let socket = null;
-let socketPromise = null;
 let activeRoomCode = "";
+let roomVisibility = "private";
+let guestId = "";
+let guestName = "";
+let hostName = "";
+let pendingJoin = null;
 let pendingRequestId = "";
+let roomStarted = false;
+let supabaseClient = null;
+let lobbyChannel = null;
+let roomChannel = null;
+let lobbyPromise = null;
 
 profileName.textContent = nickname;
 
@@ -59,70 +73,65 @@ function setSessionError(message = "") {
   sessionError.textContent = message;
 }
 
-function send(message) {
-  if (socket?.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(message));
-    return true;
+function getSupabaseClient() {
+  if (supabaseClient) return supabaseClient;
+
+  const url = window.GENBLOX_CONFIG?.supabaseUrl;
+  const key = window.GENBLOX_CONFIG?.supabaseKey;
+  const missingConfig = !url || !key || url.startsWith("YOUR_") || key.startsWith("YOUR_");
+
+  if (missingConfig) {
+    throw new Error("SUPABASE_CONFIG_MISSING");
   }
-  return false;
-}
-
-function ensureSocket() {
-  if (socket?.readyState === WebSocket.OPEN) {
-    return Promise.resolve();
+  if (!window.supabase?.createClient) {
+    throw new Error("SUPABASE_LIBRARY_MISSING");
   }
-  if (socketPromise) return socketPromise;
 
-  connectionStatus.textContent = "Подключаемся к серверу Render…";
-  const url = window.GENBLOX_CONFIG?.websocketUrl;
-
-  socketPromise = new Promise((resolve, reject) => {
-    if (!url) {
-      reject(new Error("WebSocket URL is not configured"));
-      return;
-    }
-
-    socket = new WebSocket(url);
-
-    const timeout = setTimeout(() => {
-      socket.close();
-      reject(new Error("Connection timeout"));
-    }, 75_000);
-
-    socket.addEventListener("open", () => {
-      clearTimeout(timeout);
-      send({ type: "hello", nickname });
-      connectionStatus.textContent = "Сервер подключён";
-      resolve();
-    }, { once: true });
-
-    socket.addEventListener("message", handleServerMessage);
-
-    socket.addEventListener("error", () => {
-      clearTimeout(timeout);
-      reject(new Error("Connection failed"));
-    }, { once: true });
-
-    socket.addEventListener("close", () => {
-      socket = null;
-      socketPromise = null;
-      if (gameMode !== "local") {
-        statusLabel.textContent = "Связь с сервером потеряна";
-        gameHint.textContent = "Обнови страницу или попробуй подключиться снова";
-      }
-    });
-  }).catch((error) => {
-    socketPromise = null;
-    setSessionError(
-      "Сервер не ответил. На бесплатном Render первый запуск может занять около минуты.",
-    );
-    throw error;
+  supabaseClient = window.supabase.createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+    realtime: {
+      params: { eventsPerSecond: 10 },
+    },
   });
-
-  return socketPromise;
+  return supabaseClient;
 }
 
-function renderPublicRooms(rooms) {
+function lobbyPresence() {
+  return {
+    clientId,
+    nickname,
+    kind: gameMode === "host" && activeRoomCode ? "room" : "visitor",
+    roomCode: activeRoomCode || null,
+    visibility: roomVisibility,
+    waiting: gameMode === "host" && !guestId,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function updateLobbyPresence() {
+  if (lobbyChannel) {
+    await lobbyChannel.track(lobbyPresence());
+  }
+}
+
+function renderPublicRoomsFromPresence() {
+  if (!lobbyChannel) return;
+  const rooms = Object.values(lobbyChannel.presenceState())
+    .flat()
+    .filter((presence) => (
+      presence.kind === "room" &&
+      presence.visibility === "public" &&
+      presence.waiting &&
+      presence.clientId !== clientId
+    ))
+    .filter((room, index, list) => (
+      list.findIndex((item) => item.roomCode === room.roomCode) === index
+    ));
+
   publicRoomList.replaceChildren();
 
   if (!rooms.length) {
@@ -139,119 +148,209 @@ function renderPublicRooms(rooms) {
     const info = document.createElement("span");
     const title = document.createElement("strong");
     const meta = document.createElement("small");
-    title.textContent = `${room.hostName || "guest"} · ${room.code}`;
+    title.textContent = `${room.nickname || "guest"} · ${room.roomCode}`;
     meta.textContent = "1/2 игроков · ожидает";
     info.append(title, meta);
 
     const joinButton = document.createElement("button");
     joinButton.type = "button";
     joinButton.textContent = "Запрос";
-    joinButton.addEventListener("click", () => requestJoin(room.code));
+    joinButton.addEventListener("click", () => requestJoin(room.roomCode));
 
     item.append(info, joinButton);
     publicRoomList.append(item);
   });
 }
 
-function handleServerMessage(event) {
-  let message;
-  try {
-    message = JSON.parse(event.data);
-  } catch {
-    return;
+function ensureLobby() {
+  if (lobbyChannel) return Promise.resolve();
+  if (lobbyPromise) return lobbyPromise;
+
+  lobbyPromise = new Promise((resolve, reject) => {
+    let client;
+    try {
+      client = getSupabaseClient();
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      reject(new Error("LOBBY_TIMEOUT"));
+    }, 15_000);
+
+    lobbyChannel = client.channel("genblox:lobby:v1", {
+      config: {
+        presence: { key: clientId },
+      },
+    });
+
+    lobbyChannel
+      .on("presence", { event: "sync" }, renderPublicRoomsFromPresence)
+      .subscribe(async (status, error) => {
+        if (status === "SUBSCRIBED") {
+          clearTimeout(timeout);
+          await updateLobbyPresence();
+          renderPublicRoomsFromPresence();
+          connectionStatus.textContent = "Supabase Realtime подключён";
+          resolve();
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          clearTimeout(timeout);
+          console.error("Supabase lobby error", status, error);
+          lobbyChannel = null;
+          lobbyPromise = null;
+          reject(error || new Error(status));
+        }
+      });
+  });
+
+  return lobbyPromise;
+}
+
+function sendRoomEvent(event, payload) {
+  if (!roomChannel) return Promise.resolve("no-channel");
+  return roomChannel.send({
+    type: "broadcast",
+    event,
+    payload,
+  });
+}
+
+async function leaveRoom({ notify = true } = {}) {
+  if (!roomChannel) return;
+
+  if (notify && gameMode === "host") {
+    await sendRoomEvent("host_closed", { hostId: clientId });
+  } else if (notify && gameMode === "guest") {
+    await sendRoomEvent("guest_left", { guestId: clientId });
   }
 
-  if (message.type === "rooms") {
-    renderPublicRooms(message.rooms || []);
-    return;
-  }
+  const channel = roomChannel;
+  roomChannel = null;
+  await channel.untrack();
+  await getSupabaseClient().removeChannel(channel);
 
-  if (message.type === "room_created") {
-    activeRoomCode = message.code;
-    gameMode = "host";
-    createdRoomCode.textContent = message.code;
-    sessionOptions.hidden = true;
-    roomWaiting.hidden = false;
-    joinRequest.hidden = true;
-    connectionStatus.textContent = message.visibility === "public"
-      ? "Комната опубликована. Ждём запрос игрока…"
-      : "Приватная комната готова. Передай код другу.";
-    return;
-  }
+  activeRoomCode = "";
+  guestId = "";
+  guestName = "";
+  hostName = "";
+  roomStarted = false;
+  pendingJoin = null;
+  pendingRequestId = "";
+}
 
-  if (message.type === "join_pending") {
-    activeRoomCode = message.code;
-    createdRoomCode.textContent = message.code;
-    sessionOptions.hidden = true;
-    roomWaiting.hidden = false;
-    connectionStatus.textContent = "Запрос отправлен. Ждём ответа владельца…";
-    return;
-  }
+async function subscribeToRoom(code, role) {
+  await leaveRoom();
+  const client = getSupabaseClient();
+  activeRoomCode = code;
+  roomStarted = false;
 
-  if (message.type === "join_request") {
-    pendingRequestId = message.requestId;
-    requesterName.textContent = message.nickname || "guest";
-    joinRequest.hidden = false;
-    connectionStatus.textContent = "Получен запрос на вход";
-    showDialog(sessionDialog);
-    return;
-  }
+  roomChannel = client.channel(`genblox:room:${code}`, {
+    config: {
+      broadcast: { ack: true, self: false },
+      presence: { key: clientId },
+    },
+  });
 
-  if (message.type === "join_approved") {
-    gameMode = message.role;
-    activeRoomCode = message.code;
-    joinRequest.hidden = true;
-    nextRoundButton.disabled = gameMode === "guest";
-    resetScoreButton.disabled = gameMode === "guest";
-    connectionStatus.textContent = "Игрок подключён";
-    return;
-  }
+  roomChannel
+    .on("broadcast", { event: "join_request" }, ({ payload }) => {
+      if (
+        gameMode !== "host" ||
+        guestId ||
+        !payload?.requestId ||
+        payload.clientId === clientId
+      ) return;
+      pendingJoin = payload;
+      pendingRequestId = payload.requestId;
+      requesterName.textContent = payload.nickname || "guest";
+      joinRequest.hidden = false;
+      connectionStatus.textContent = "Получен запрос на вход";
+      showDialog(sessionDialog);
+    })
+    .on("broadcast", { event: "join_response" }, ({ payload }) => {
+      if (
+        role !== "guest" ||
+        payload?.targetClientId !== clientId ||
+        payload?.requestId !== pendingRequestId
+      ) return;
 
-  if (message.type === "join_denied") {
-    setSessionError(message.message || "Запрос отклонён.");
-    sessionOptions.hidden = false;
-    roomWaiting.hidden = true;
-    return;
-  }
+      if (!payload.approved) {
+        setSessionError("Владелец комнаты отклонил запрос.");
+        sessionOptions.hidden = false;
+        roomWaiting.hidden = true;
+        void leaveRoom({ notify: false });
+        return;
+      }
 
-  if (message.type === "state") {
-    board = message.board;
-    currentPlayer = message.currentPlayer;
-    round = message.round;
-    scores = message.scores;
-    roundFinished = message.roundFinished;
-    winningLine = message.winningLine;
-    playerNameX.textContent = message.hostName || "Хост";
-    playerNameO.textContent = message.guestName || "Гость";
-    gameHint.textContent = gameMode === "host"
-      ? `Ты играешь крестиками · комната ${activeRoomCode}`
-      : `Ты играешь ноликами · комната ${activeRoomCode}`;
-    renderGame();
-    closeDialog(sessionDialog);
-    showDialog(gameDialog);
-    return;
-  }
+      gameMode = "guest";
+      hostName = payload.hostName || "Хост";
+      roomStarted = true;
+      nextRoundButton.disabled = true;
+      resetScoreButton.disabled = true;
+      connectionStatus.textContent = "Подключено. Загружаем матч…";
+    })
+    .on("broadcast", { event: "move" }, ({ payload }) => {
+      if (
+        gameMode === "host" &&
+        payload?.clientId === guestId &&
+        currentPlayer === "O"
+      ) {
+        applyHostMove(Number(payload.index), "O");
+      }
+    })
+    .on("broadcast", { event: "command" }, ({ payload }) => {
+      if (gameMode !== "host" || payload?.clientId !== guestId) return;
+      if (payload.command === "leave") handleGuestLeft();
+    })
+    .on("broadcast", { event: "state" }, ({ payload }) => {
+      if (gameMode !== "guest" || payload?.guestId !== clientId) return;
+      hydrateState(payload);
+      closeDialog(sessionDialog);
+      showDialog(gameDialog);
+    })
+    .on("broadcast", { event: "host_closed" }, ({ payload }) => {
+      if (gameMode === "guest" && payload?.hostId !== clientId) {
+        handleHostClosed();
+      }
+    })
+    .on("broadcast", { event: "guest_left" }, ({ payload }) => {
+      if (gameMode === "host" && payload?.guestId === guestId) {
+        handleGuestLeft();
+      }
+    })
+    .subscribe(async (status, error) => {
+      if (status === "SUBSCRIBED") {
+        await roomChannel.track({
+          clientId,
+          nickname,
+          role,
+          joinedAt: new Date().toISOString(),
+        });
 
-  if (message.type === "guest_left") {
-    gameHint.textContent = "Второй игрок вышел. Комната снова ожидает.";
-    statusLabel.textContent = "Игрок отключился";
-    return;
-  }
+        if (role === "guest") {
+          await sendRoomEvent("join_request", {
+            requestId: pendingRequestId,
+            clientId,
+            nickname,
+          });
+        }
+      }
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.error("Supabase room error", status, error);
+        setSessionError("Не удалось подключиться к каналу комнаты.");
+        sessionOptions.hidden = false;
+        roomWaiting.hidden = true;
+      }
+    });
+}
 
-  if (message.type === "room_closed") {
-    closeDialog(gameDialog);
-    setSessionError(message.message || "Комната закрыта.");
-    sessionOptions.hidden = false;
-    roomWaiting.hidden = true;
-    showDialog(sessionDialog);
-    return;
-  }
-
-  if (message.type === "error") {
-    setSessionError(message.message || "Ошибка сервера.");
-    sessionOptions.hidden = false;
-    roomWaiting.hidden = true;
-  }
+function generateRoomCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from(
+    { length: 6 },
+    () => alphabet[Math.floor(Math.random() * alphabet.length)],
+  ).join("");
 }
 
 async function openSessionMenu() {
@@ -263,25 +362,45 @@ async function openSessionMenu() {
   showDialog(sessionDialog);
 
   try {
-    await ensureSocket();
-    send({ type: "list_rooms" });
-  } catch {
-    renderPublicRooms([]);
+    await ensureLobby();
+    renderPublicRoomsFromPresence();
+  } catch (error) {
+    publicRoomList.replaceChildren();
+    const empty = document.createElement("p");
+    empty.textContent = "Realtime недоступен";
+    publicRoomList.append(empty);
+    setSessionError(
+      error.message === "SUPABASE_CONFIG_MISSING"
+        ? "Заполни supabaseUrl и supabaseKey в config.js."
+        : "Не удалось подключиться к Supabase Realtime.",
+    );
   }
 }
 
 async function createRoom(visibility) {
   setSessionError();
-  sessionOptions.hidden = true;
-  roomWaiting.hidden = false;
-  createdRoomCode.textContent = "------";
-
   try {
-    await ensureSocket();
-    send({ type: "create_room", visibility });
-  } catch {
+    await ensureLobby();
+    gameMode = "host";
+    roomVisibility = visibility;
+    activeRoomCode = generateRoomCode();
+    guestId = "";
+    guestName = "";
+    createdRoomCode.textContent = activeRoomCode;
+    sessionOptions.hidden = true;
+    roomWaiting.hidden = false;
+    joinRequest.hidden = true;
+    await subscribeToRoom(activeRoomCode, "host");
+    await updateLobbyPresence();
+    connectionStatus.textContent = visibility === "public"
+      ? "Комната опубликована. Ждём запрос игрока…"
+      : "Приватная комната готова. Передай код другу.";
+  } catch (error) {
+    console.error(error);
+    gameMode = "local";
     sessionOptions.hidden = false;
     roomWaiting.hidden = true;
+    setSessionError("Не удалось создать комнату.");
   }
 }
 
@@ -296,30 +415,99 @@ async function requestJoin(roomCode) {
   sessionOptions.hidden = true;
   roomWaiting.hidden = false;
   createdRoomCode.textContent = code;
+  connectionStatus.textContent = "Отправляем запрос владельцу…";
 
   try {
-    await ensureSocket();
-    send({ type: "request_join", code });
-  } catch {
+    await ensureLobby();
+    gameMode = "guest";
+    activeRoomCode = code;
+    pendingRequestId = crypto.randomUUID();
+    await subscribeToRoom(code, "guest");
+
+    setTimeout(() => {
+      if (gameMode === "guest" && !roomStarted && activeRoomCode === code) {
+        setSessionError("Комната не ответила. Проверь код или попроси хоста пересоздать её.");
+        sessionOptions.hidden = false;
+        roomWaiting.hidden = true;
+        void leaveRoom({ notify: false });
+      }
+    }, 12_000);
+  } catch (error) {
+    console.error(error);
     sessionOptions.hidden = false;
     roomWaiting.hidden = true;
+    setSessionError("Не удалось подключиться к комнате.");
   }
 }
 
-function startLocalGame() {
-  if (gameMode !== "local" && activeRoomCode) {
-    send({ type: "leave_room" });
-  }
-  gameMode = "local";
-  activeRoomCode = "";
+async function approveJoin() {
+  if (!pendingJoin || gameMode !== "host") return;
+  guestId = pendingJoin.clientId;
+  guestName = pendingJoin.nickname || "guest";
+  roomStarted = true;
+  joinRequest.hidden = true;
+  playerNameX.textContent = nickname;
+  playerNameO.textContent = guestName;
+  gameHint.textContent = `Ты играешь крестиками · комната ${activeRoomCode}`;
   nextRoundButton.disabled = false;
   resetScoreButton.disabled = false;
-  playerNameX.textContent = nickname;
-  playerNameO.textContent = "Игрок 2";
-  gameHint.textContent = "Сейчас играют двое за одним устройством";
-  resetScore(false);
+  resetHostGame();
+  await updateLobbyPresence();
+  await sendRoomEvent("join_response", {
+    approved: true,
+    requestId: pendingJoin.requestId,
+    targetClientId: guestId,
+    hostName: nickname,
+  });
+  await broadcastState();
+  pendingJoin = null;
   closeDialog(sessionDialog);
   showDialog(gameDialog);
+}
+
+async function denyJoin() {
+  if (!pendingJoin) return;
+  await sendRoomEvent("join_response", {
+    approved: false,
+    requestId: pendingJoin.requestId,
+    targetClientId: pendingJoin.clientId,
+  });
+  pendingJoin = null;
+  joinRequest.hidden = true;
+  connectionStatus.textContent = "Запрос отклонён. Ждём другого игрока…";
+}
+
+function statePayload() {
+  return {
+    board,
+    currentPlayer,
+    round,
+    scores,
+    roundFinished,
+    winningLine,
+    hostName: nickname,
+    guestName,
+    guestId,
+  };
+}
+
+function broadcastState() {
+  return sendRoomEvent("state", statePayload());
+}
+
+function hydrateState(state) {
+  board = state.board;
+  currentPlayer = state.currentPlayer;
+  round = state.round;
+  scores = state.scores;
+  roundFinished = state.roundFinished;
+  winningLine = state.winningLine;
+  hostName = state.hostName || "Хост";
+  guestName = state.guestName || nickname;
+  playerNameX.textContent = hostName;
+  playerNameO.textContent = nickname;
+  gameHint.textContent = `Ты играешь ноликами · комната ${activeRoomCode}`;
+  renderGame();
 }
 
 function findWinningLine() {
@@ -328,26 +516,46 @@ function findWinningLine() {
   )) || null;
 }
 
+function finishMove(player) {
+  winningLine = findWinningLine();
+  if (winningLine || board.every(Boolean)) {
+    roundFinished = true;
+    if (winningLine) scores[player] += 1;
+  } else {
+    currentPlayer = player === "X" ? "O" : "X";
+  }
+  renderGame();
+}
+
+function applyHostMove(index, expectedPlayer) {
+  if (
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index > 8 ||
+    roundFinished ||
+    board[index] ||
+    currentPlayer !== expectedPlayer
+  ) return;
+
+  board[index] = expectedPlayer;
+  finishMove(expectedPlayer);
+  void broadcastState();
+}
+
 function applyLocalMove(index) {
   if (roundFinished || board[index]) return;
   board[index] = currentPlayer;
-  winningLine = findWinningLine();
-
-  if (winningLine || board.every(Boolean)) {
-    roundFinished = true;
-    if (winningLine) scores[currentPlayer] += 1;
-  } else {
-    currentPlayer = currentPlayer === "X" ? "O" : "X";
-  }
-  renderGame();
+  finishMove(currentPlayer);
 }
 
 function playCell(event) {
   const index = Number(event.currentTarget.dataset.cell);
   if (gameMode === "local") {
     applyLocalMove(index);
-  } else {
-    send({ type: "move", index });
+  } else if (gameMode === "host" && currentPlayer === "X") {
+    applyHostMove(index, "X");
+  } else if (gameMode === "guest" && currentPlayer === "O") {
+    void sendRoomEvent("move", { clientId, index });
   }
 }
 
@@ -381,33 +589,73 @@ function renderGame() {
 }
 
 function startRound(incrementRound = true) {
-  if (gameMode !== "local") {
-    if (gameMode === "host") send({ type: "new_round" });
-    return;
-  }
+  if (gameMode === "guest") return;
   if (incrementRound) round += 1;
   board = Array(9).fill("");
   roundFinished = false;
   winningLine = null;
   currentPlayer = round % 2 === 1 ? "X" : "O";
   renderGame();
+  if (gameMode === "host") void broadcastState();
 }
 
-function resetScore(render = true) {
-  if (gameMode !== "local") {
-    if (gameMode === "host") send({ type: "reset_score" });
-    return;
-  }
+function resetScore() {
+  if (gameMode === "guest") return;
   scores = { X: 0, O: 0 };
   round = 1;
   startRound(false);
-  if (render) renderGame();
+}
+
+function resetHostGame() {
+  scores = { X: 0, O: 0 };
+  round = 1;
+  board = Array(9).fill("");
+  currentPlayer = "X";
+  roundFinished = false;
+  winningLine = null;
+  renderGame();
+}
+
+function handleGuestLeft() {
+  if (gameMode !== "host") return;
+  guestId = "";
+  guestName = "";
+  roomStarted = false;
+  statusLabel.textContent = "Игрок отключился";
+  gameHint.textContent = "Комната снова ожидает второго игрока";
+  void updateLobbyPresence();
+}
+
+function handleHostClosed() {
+  if (gameMode !== "guest") return;
+  closeDialog(gameDialog);
+  setSessionError("Владелец закрыл комнату.");
+  sessionOptions.hidden = false;
+  roomWaiting.hidden = true;
+  showDialog(sessionDialog);
+  void leaveRoom({ notify: false });
+  gameMode = "local";
+}
+
+async function startLocalGame() {
+  if (gameMode !== "local") {
+    await leaveRoom();
+    gameMode = "local";
+    await updateLobbyPresence();
+  }
+  nextRoundButton.disabled = false;
+  resetScoreButton.disabled = false;
+  playerNameX.textContent = nickname;
+  playerNameO.textContent = "Игрок 2";
+  gameHint.textContent = "Сейчас играют двое за одним устройством";
+  resetScore();
+  closeDialog(sessionDialog);
+  showDialog(gameDialog);
 }
 
 document.querySelectorAll("#open-space, #join-space").forEach((button) => {
   button.addEventListener("click", openSessionMenu);
 });
-
 document.querySelector("#create-public-room").addEventListener(
   "click",
   () => createRoom("public"),
@@ -422,33 +670,25 @@ document.querySelector("#connect-room").addEventListener(
 );
 document.querySelector("#refresh-rooms").addEventListener("click", async () => {
   try {
-    await ensureSocket();
-    send({ type: "list_rooms" });
+    await ensureLobby();
+    renderPublicRoomsFromPresence();
   } catch {
-    renderPublicRooms([]);
+    setSessionError("Realtime недоступен.");
   }
 });
 document.querySelector("#local-game").addEventListener("click", startLocalGame);
+document.querySelector("#approve-join").addEventListener("click", approveJoin);
+document.querySelector("#deny-join").addEventListener("click", denyJoin);
 
-document.querySelector("#approve-join").addEventListener("click", () => {
-  send({ type: "resolve_join", requestId: pendingRequestId, approved: true });
-  joinRequest.hidden = true;
-});
-document.querySelector("#deny-join").addEventListener("click", () => {
-  send({ type: "resolve_join", requestId: pendingRequestId, approved: false });
-  joinRequest.hidden = true;
-  connectionStatus.textContent = "Запрос отклонён. Ждём другого игрока…";
-});
-
-document.querySelector("#cancel-room").addEventListener("click", () => {
-  send({ type: "leave_room" });
-  activeRoomCode = "";
+document.querySelector("#cancel-room").addEventListener("click", async () => {
+  await leaveRoom();
   gameMode = "local";
+  await updateLobbyPresence();
   sessionOptions.hidden = false;
   roomWaiting.hidden = true;
   joinRequest.hidden = true;
   setSessionError();
-  send({ type: "list_rooms" });
+  renderPublicRoomsFromPresence();
 });
 
 document.querySelector("#copy-room-code").addEventListener("click", async () => {
@@ -462,14 +702,14 @@ document.querySelector("#profile-button").addEventListener("click", () => {
   nicknameInput.focus();
 });
 
-profileForm.addEventListener("submit", (event) => {
+profileForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const nextName = nicknameInput.value.trim().slice(0, 16);
   if (nextName.length < 2) return;
   nickname = nextName;
   localStorage.setItem("genblox:nickname", nickname);
   profileName.textContent = nickname;
-  send({ type: "hello", nickname });
+  await updateLobbyPresence();
   closeDialog(profileDialog);
 });
 
@@ -484,7 +724,7 @@ document.querySelector("#close-game").addEventListener(
   () => closeDialog(gameDialog),
 );
 nextRoundButton.addEventListener("click", () => startRound(true));
-resetScoreButton.addEventListener("click", () => resetScore());
+resetScoreButton.addEventListener("click", resetScore);
 cells.forEach((cell) => cell.addEventListener("click", playCell));
 
 [sessionDialog, profileDialog, gameDialog].forEach((dialog) => {
@@ -518,7 +758,13 @@ boardElement.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("beforeunload", () => {
-  send({ type: "leave_room" });
+  if (roomChannel) {
+    if (gameMode === "host") {
+      void sendRoomEvent("host_closed", { hostId: clientId });
+    } else if (gameMode === "guest") {
+      void sendRoomEvent("guest_left", { guestId: clientId });
+    }
+  }
 });
 
 renderGame();

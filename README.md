@@ -27,9 +27,9 @@ python -m http.server 3000
 2. Передать появившийся шестизначный код второму игроку.
 3. На втором устройстве нажать «Играть», ввести код и выбрать «Войти».
 
-Соединение между браузерами работает через Cloudflare Worker и Durable Object.
-Отдельная база данных не требуется: комнаты автоматически удаляются после
-отключения их владельцев.
+Соединение между браузерами работает через Supabase Realtime. Таблицы базы
+данных не используются: Presence формирует каталог комнат, а Broadcast
+передаёт запросы на вход, ходы и состояние матча.
 
 Доступны два типа комнат:
 
@@ -38,28 +38,32 @@ python -m http.server 3000
 
 Перед входом второго игрока владелец комнаты принимает или отклоняет запрос.
 
-### Локальный запуск realtime-сервера
+### Настройка Supabase
 
-```powershell
-cd worker
-npm install
-npm run dev
+1. В Supabase Dashboard открыть **Project Settings → API**.
+2. Скопировать Project URL и Publishable key. Для старого проекта допустим
+   legacy `anon` key.
+3. Вставить значения в `config.js`:
+
+```js
+window.GENBLOX_CONFIG = {
+  supabaseUrl: "https://PROJECT.supabase.co",
+  supabaseKey: "sb_publishable_..."
+};
 ```
 
-Сайт автоматически использует `ws://localhost:8787/ws` при локальном запуске.
+`service_role`, secret key, JWT secret и пароль базы нельзя помещать в
+`config.js` или любой другой файл клиентского приложения.
 
-### Развёртывание на Cloudflare
+Если сайт развёрнут на Vercel, достаточно добавить там переменные
+`SUPABASE_URL` и `SUPABASE_PUBLISHABLE_KEY` либо `SUPABASE_ANON_KEY`.
+Функция `api/config.js` безопасно передаст браузеру только эти публичные
+значения. Остальные переменные из `.env` она не читает.
 
-1. Отправить репозиторий в GitHub или GitLab.
-2. В Cloudflare открыть **Workers & Pages → Create application**.
-3. Импортировать репозиторий и выбрать корневой каталог `worker`.
-4. Указать deploy command: `npx wrangler deploy`.
-5. После первого деплоя скопировать адрес `workers.dev`.
-6. Заменить `YOUR-SUBDOMAIN` в `config.js` на поддомен своего аккаунта.
-7. Повторно опубликовать статический сайт на Vercel.
+### Развёртывание
 
-Привязка Durable Object и её первая миграция уже описаны в
-`worker/wrangler.jsonc`.
+После заполнения `config.js` сайт разворачивается на Vercel как обычный
+статический проект. Отдельный backend-деплой не требуется.
 
 ## Процесс разработки
 

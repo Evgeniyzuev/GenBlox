@@ -1,6 +1,6 @@
 window.GENBLOX_CONFIG = {
-  websocketUrl:
-    location.hostname === "localhost" || location.hostname === "127.0.0.1"
-      ? "ws://localhost:8787/ws"
-      : "wss://genblox-realtime.YOUR-SUBDOMAIN.workers.dev/ws",
+  // Эти два значения публичны и предназначены для браузерного клиента.
+  // Возьмите их из Supabase Dashboard → Project Settings → API.
+  supabaseUrl: "YOUR_SUPABASE_URL",
+  supabaseKey: "YOUR_SUPABASE_PUBLISHABLE_OR_ANON_KEY",
 };
