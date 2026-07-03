@@ -7,6 +7,9 @@ const sessionError = document.querySelector("#session-error");
 const connectionStatus = document.querySelector("#connection-status");
 const roomCodeInput = document.querySelector("#room-code");
 const createdRoomCode = document.querySelector("#created-room-code");
+const publicRoomList = document.querySelector("#public-room-list");
+const joinRequest = document.querySelector("#join-request");
+const requesterName = document.querySelector("#requester-name");
 const profileName = document.querySelector("#profile-name");
 const nicknameInput = document.querySelector("#nickname");
 const profileForm = document.querySelector("#profile-form");
@@ -18,6 +21,8 @@ const roundLabel = document.querySelector("#round-number");
 const scoreXLabel = document.querySelector("#score-x");
 const scoreOLabel = document.querySelector("#score-o");
 const boardElement = document.querySelector("#game-board");
+const nextRoundButton = document.querySelector("#next-round");
+const resetScoreButton = document.querySelector("#reset-score");
 const cells = [...document.querySelectorAll("[data-cell]")];
 const playerCards = [...document.querySelectorAll("[data-player]")];
 
@@ -35,10 +40,10 @@ let scores = { X: 0, O: 0 };
 let roundFinished = false;
 let winningLine = null;
 let gameMode = "local";
-let peer = null;
-let hostConnection = null;
-let guestConnection = null;
-let remoteNickname = "Друг";
+let socket = null;
+let socketPromise = null;
+let activeRoomCode = "";
+let pendingRequestId = "";
 
 profileName.textContent = nickname;
 
@@ -54,191 +59,267 @@ function setSessionError(message = "") {
   sessionError.textContent = message;
 }
 
-function openSessionMenu() {
-  setSessionError();
-  sessionOptions.hidden = false;
-  roomWaiting.hidden = true;
-  roomCodeInput.value = "";
-  showDialog(sessionDialog);
+function send(message) {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(message));
+    return true;
+  }
+  return false;
 }
 
-function openGame() {
-  closeDialog(sessionDialog);
-  showDialog(gameDialog);
-}
+function ensureSocket() {
+  if (socket?.readyState === WebSocket.OPEN) {
+    return Promise.resolve();
+  }
+  if (socketPromise) return socketPromise;
 
-function destroyPeer() {
-  if (peer && !peer.destroyed) peer.destroy();
-  peer = null;
-  hostConnection = null;
-  guestConnection = null;
-}
+  connectionStatus.textContent = "Подключаемся к серверу Render…";
+  const url = window.GENBLOX_CONFIG?.websocketUrl;
 
-function generateRoomCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: 6 }, () => (
-    alphabet[Math.floor(Math.random() * alphabet.length)]
-  )).join("");
-}
-
-function roomPeerId(code) {
-  return `genblox-${code.toLowerCase()}`;
-}
-
-function gameState() {
-  return {
-    type: "state",
-    board,
-    currentPlayer,
-    round,
-    scores,
-    roundFinished,
-    winningLine,
-    hostName: nickname,
-    guestName: remoteNickname,
-  };
-}
-
-function broadcastState() {
-  if (guestConnection?.open) guestConnection.send(gameState());
-}
-
-function configureConnection(connection, isHost) {
-  connection.on("open", () => {
-    if (isHost) {
-      guestConnection = connection;
-      remoteNickname = connection.metadata?.nickname || "guest";
-      connectionStatus.textContent = `${remoteNickname} подключился — начинаем!`;
-      playerNameX.textContent = nickname;
-      playerNameO.textContent = remoteNickname;
-      gameHint.textContent = "Ты играешь крестиками · комната подключена";
-      resetScore(false);
-      broadcastState();
-      setTimeout(openGame, 500);
-    } else {
-      hostConnection = connection;
-      remoteNickname = connection.metadata?.hostName || "Хост";
-      connection.send({ type: "hello", nickname });
-      gameHint.textContent = "Ты играешь ноликами · ход синхронизирован";
-      connectionStatus.textContent = "Подключено!";
+  socketPromise = new Promise((resolve, reject) => {
+    if (!url) {
+      reject(new Error("WebSocket URL is not configured"));
+      return;
     }
-  });
 
-  connection.on("data", (data) => {
-    if (!data || typeof data !== "object") return;
+    socket = new WebSocket(url);
 
-    if (isHost) {
-      if (data.type === "hello") {
-        remoteNickname = data.nickname || "guest";
-        playerNameO.textContent = remoteNickname;
-        broadcastState();
+    const timeout = setTimeout(() => {
+      socket.close();
+      reject(new Error("Connection timeout"));
+    }, 75_000);
+
+    socket.addEventListener("open", () => {
+      clearTimeout(timeout);
+      send({ type: "hello", nickname });
+      connectionStatus.textContent = "Сервер подключён";
+      resolve();
+    }, { once: true });
+
+    socket.addEventListener("message", handleServerMessage);
+
+    socket.addEventListener("error", () => {
+      clearTimeout(timeout);
+      reject(new Error("Connection failed"));
+    }, { once: true });
+
+    socket.addEventListener("close", () => {
+      socket = null;
+      socketPromise = null;
+      if (gameMode !== "local") {
+        statusLabel.textContent = "Связь с сервером потеряна";
+        gameHint.textContent = "Обнови страницу или попробуй подключиться снова";
       }
-      if (data.type === "move") applyMove(Number(data.index), "O");
-      if (data.type === "new-round") startRound(true);
-      if (data.type === "reset-score") resetScore();
-    } else if (data.type === "state") {
-      board = data.board;
-      currentPlayer = data.currentPlayer;
-      round = data.round;
-      scores = data.scores;
-      roundFinished = data.roundFinished;
-      winningLine = data.winningLine;
-      remoteNickname = data.hostName || "Хост";
-      playerNameX.textContent = remoteNickname;
-      playerNameO.textContent = nickname;
-      renderGame();
-      openGame();
-    }
+    });
+  }).catch((error) => {
+    socketPromise = null;
+    setSessionError(
+      "Сервер не ответил. На бесплатном Render первый запуск может занять около минуты.",
+    );
+    throw error;
   });
 
-  connection.on("close", () => {
-    statusLabel.textContent = "Друг отключился";
-    gameHint.textContent = "Соединение с комнатой потеряно";
-  });
-
-  connection.on("error", () => {
-    setSessionError("Не удалось установить соединение.");
-  });
+  return socketPromise;
 }
 
-function createRoom() {
-  if (typeof Peer === "undefined") {
-    setSessionError("Сервис подключения не загрузился. Проверь интернет.");
+function renderPublicRooms(rooms) {
+  publicRoomList.replaceChildren();
+
+  if (!rooms.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "Открытых комнат пока нет";
+    publicRoomList.append(empty);
     return;
   }
 
-  destroyPeer();
-  setSessionError();
-  const code = generateRoomCode();
-  createdRoomCode.textContent = code;
-  sessionOptions.hidden = true;
-  roomWaiting.hidden = false;
-  connectionStatus.textContent = "Создаём комнату…";
-  gameMode = "host";
+  rooms.forEach((room) => {
+    const item = document.createElement("div");
+    item.className = "public-room";
 
-  peer = new Peer(roomPeerId(code));
-  peer.on("open", () => {
-    connectionStatus.textContent = "Ждём второго игрока…";
-  });
-  peer.on("connection", (connection) => configureConnection(connection, true));
-  peer.on("error", (error) => {
-    if (error.type === "unavailable-id") {
-      createRoom();
-      return;
-    }
-    setSessionError("Комната не создалась. Попробуй ещё раз.");
-    sessionOptions.hidden = false;
-    roomWaiting.hidden = true;
+    const info = document.createElement("span");
+    const title = document.createElement("strong");
+    const meta = document.createElement("small");
+    title.textContent = `${room.hostName || "guest"} · ${room.code}`;
+    meta.textContent = "1/2 игроков · ожидает";
+    info.append(title, meta);
+
+    const joinButton = document.createElement("button");
+    joinButton.type = "button";
+    joinButton.textContent = "Запрос";
+    joinButton.addEventListener("click", () => requestJoin(room.code));
+
+    item.append(info, joinButton);
+    publicRoomList.append(item);
   });
 }
 
-function connectToRoom() {
-  const code = roomCodeInput.value.trim().toUpperCase();
+function handleServerMessage(event) {
+  let message;
+  try {
+    message = JSON.parse(event.data);
+  } catch {
+    return;
+  }
+
+  if (message.type === "rooms") {
+    renderPublicRooms(message.rooms || []);
+    return;
+  }
+
+  if (message.type === "room_created") {
+    activeRoomCode = message.code;
+    gameMode = "host";
+    createdRoomCode.textContent = message.code;
+    sessionOptions.hidden = true;
+    roomWaiting.hidden = false;
+    joinRequest.hidden = true;
+    connectionStatus.textContent = message.visibility === "public"
+      ? "Комната опубликована. Ждём запрос игрока…"
+      : "Приватная комната готова. Передай код другу.";
+    return;
+  }
+
+  if (message.type === "join_pending") {
+    activeRoomCode = message.code;
+    createdRoomCode.textContent = message.code;
+    sessionOptions.hidden = true;
+    roomWaiting.hidden = false;
+    connectionStatus.textContent = "Запрос отправлен. Ждём ответа владельца…";
+    return;
+  }
+
+  if (message.type === "join_request") {
+    pendingRequestId = message.requestId;
+    requesterName.textContent = message.nickname || "guest";
+    joinRequest.hidden = false;
+    connectionStatus.textContent = "Получен запрос на вход";
+    showDialog(sessionDialog);
+    return;
+  }
+
+  if (message.type === "join_approved") {
+    gameMode = message.role;
+    activeRoomCode = message.code;
+    joinRequest.hidden = true;
+    nextRoundButton.disabled = gameMode === "guest";
+    resetScoreButton.disabled = gameMode === "guest";
+    connectionStatus.textContent = "Игрок подключён";
+    return;
+  }
+
+  if (message.type === "join_denied") {
+    setSessionError(message.message || "Запрос отклонён.");
+    sessionOptions.hidden = false;
+    roomWaiting.hidden = true;
+    return;
+  }
+
+  if (message.type === "state") {
+    board = message.board;
+    currentPlayer = message.currentPlayer;
+    round = message.round;
+    scores = message.scores;
+    roundFinished = message.roundFinished;
+    winningLine = message.winningLine;
+    playerNameX.textContent = message.hostName || "Хост";
+    playerNameO.textContent = message.guestName || "Гость";
+    gameHint.textContent = gameMode === "host"
+      ? `Ты играешь крестиками · комната ${activeRoomCode}`
+      : `Ты играешь ноликами · комната ${activeRoomCode}`;
+    renderGame();
+    closeDialog(sessionDialog);
+    showDialog(gameDialog);
+    return;
+  }
+
+  if (message.type === "guest_left") {
+    gameHint.textContent = "Второй игрок вышел. Комната снова ожидает.";
+    statusLabel.textContent = "Игрок отключился";
+    return;
+  }
+
+  if (message.type === "room_closed") {
+    closeDialog(gameDialog);
+    setSessionError(message.message || "Комната закрыта.");
+    sessionOptions.hidden = false;
+    roomWaiting.hidden = true;
+    showDialog(sessionDialog);
+    return;
+  }
+
+  if (message.type === "error") {
+    setSessionError(message.message || "Ошибка сервера.");
+    sessionOptions.hidden = false;
+    roomWaiting.hidden = true;
+  }
+}
+
+async function openSessionMenu() {
+  setSessionError();
+  sessionOptions.hidden = false;
+  roomWaiting.hidden = true;
+  joinRequest.hidden = true;
+  roomCodeInput.value = "";
+  showDialog(sessionDialog);
+
+  try {
+    await ensureSocket();
+    send({ type: "list_rooms" });
+  } catch {
+    renderPublicRooms([]);
+  }
+}
+
+async function createRoom(visibility) {
+  setSessionError();
+  sessionOptions.hidden = true;
+  roomWaiting.hidden = false;
+  createdRoomCode.textContent = "------";
+
+  try {
+    await ensureSocket();
+    send({ type: "create_room", visibility });
+  } catch {
+    sessionOptions.hidden = false;
+    roomWaiting.hidden = true;
+  }
+}
+
+async function requestJoin(roomCode) {
+  const code = String(roomCode || "").trim().toUpperCase();
   if (code.length !== 6) {
     setSessionError("Введи шестизначный код комнаты.");
     return;
   }
-  if (typeof Peer === "undefined") {
-    setSessionError("Сервис подключения не загрузился. Проверь интернет.");
-    return;
-  }
 
-  destroyPeer();
   setSessionError();
-  connectionStatus.textContent = "Подключаемся…";
   sessionOptions.hidden = true;
   roomWaiting.hidden = false;
   createdRoomCode.textContent = code;
-  gameMode = "guest";
 
-  peer = new Peer();
-  peer.on("open", () => {
-    const connection = peer.connect(roomPeerId(code), {
-      reliable: true,
-      metadata: { nickname },
-      serialization: "json",
-    });
-    configureConnection(connection, false);
-  });
-  peer.on("error", () => {
-    setSessionError("Комната не найдена или уже закрыта.");
+  try {
+    await ensureSocket();
+    send({ type: "request_join", code });
+  } catch {
     sessionOptions.hidden = false;
     roomWaiting.hidden = true;
-  });
+  }
 }
 
 function startLocalGame() {
-  destroyPeer();
+  if (gameMode !== "local" && activeRoomCode) {
+    send({ type: "leave_room" });
+  }
   gameMode = "local";
+  activeRoomCode = "";
+  nextRoundButton.disabled = false;
+  resetScoreButton.disabled = false;
   playerNameX.textContent = nickname;
   playerNameO.textContent = "Игрок 2";
   gameHint.textContent = "Сейчас играют двое за одним устройством";
   resetScore(false);
-  openGame();
-}
-
-function setTurn(player) {
-  currentPlayer = player;
+  closeDialog(sessionDialog);
+  showDialog(gameDialog);
 }
 
 function findWinningLine() {
@@ -247,16 +328,8 @@ function findWinningLine() {
   )) || null;
 }
 
-function applyMove(index, expectedPlayer = currentPlayer) {
-  if (
-    !Number.isInteger(index) ||
-    index < 0 ||
-    index > 8 ||
-    roundFinished ||
-    board[index] ||
-    currentPlayer !== expectedPlayer
-  ) return;
-
+function applyLocalMove(index) {
+  if (roundFinished || board[index]) return;
   board[index] = currentPlayer;
   winningLine = findWinningLine();
 
@@ -264,25 +337,18 @@ function applyMove(index, expectedPlayer = currentPlayer) {
     roundFinished = true;
     if (winningLine) scores[currentPlayer] += 1;
   } else {
-    setTurn(currentPlayer === "X" ? "O" : "X");
+    currentPlayer = currentPlayer === "X" ? "O" : "X";
   }
-
   renderGame();
-  if (gameMode === "host") broadcastState();
 }
 
 function playCell(event) {
   const index = Number(event.currentTarget.dataset.cell);
-
-  if (gameMode === "guest") {
-    if (currentPlayer === "O" && hostConnection?.open) {
-      hostConnection.send({ type: "move", index });
-    }
-    return;
+  if (gameMode === "local") {
+    applyLocalMove(index);
+  } else {
+    send({ type: "move", index });
   }
-
-  if (gameMode === "host" && currentPlayer !== "X") return;
-  applyMove(index, currentPlayer);
 }
 
 function renderGame() {
@@ -314,42 +380,75 @@ function renderGame() {
   }
 }
 
-function startRound(incrementRound = true, sync = true) {
-  if (gameMode === "guest") {
-    if (sync && hostConnection?.open) hostConnection.send({ type: "new-round" });
+function startRound(incrementRound = true) {
+  if (gameMode !== "local") {
+    if (gameMode === "host") send({ type: "new_round" });
     return;
   }
   if (incrementRound) round += 1;
   board = Array(9).fill("");
   roundFinished = false;
   winningLine = null;
-  setTurn(round % 2 === 1 ? "X" : "O");
+  currentPlayer = round % 2 === 1 ? "X" : "O";
   renderGame();
-  if (gameMode === "host" && sync) broadcastState();
 }
 
-function resetScore(sync = true) {
-  if (gameMode === "guest") {
-    if (sync && hostConnection?.open) hostConnection.send({ type: "reset-score" });
+function resetScore(render = true) {
+  if (gameMode !== "local") {
+    if (gameMode === "host") send({ type: "reset_score" });
     return;
   }
   scores = { X: 0, O: 0 };
   round = 1;
-  startRound(false, sync);
+  startRound(false);
+  if (render) renderGame();
 }
 
 document.querySelectorAll("#open-space, #join-space").forEach((button) => {
   button.addEventListener("click", openSessionMenu);
 });
 
-document.querySelector("#create-room").addEventListener("click", createRoom);
-document.querySelector("#connect-room").addEventListener("click", connectToRoom);
+document.querySelector("#create-public-room").addEventListener(
+  "click",
+  () => createRoom("public"),
+);
+document.querySelector("#create-room").addEventListener(
+  "click",
+  () => createRoom("private"),
+);
+document.querySelector("#connect-room").addEventListener(
+  "click",
+  () => requestJoin(roomCodeInput.value),
+);
+document.querySelector("#refresh-rooms").addEventListener("click", async () => {
+  try {
+    await ensureSocket();
+    send({ type: "list_rooms" });
+  } catch {
+    renderPublicRooms([]);
+  }
+});
 document.querySelector("#local-game").addEventListener("click", startLocalGame);
+
+document.querySelector("#approve-join").addEventListener("click", () => {
+  send({ type: "resolve_join", requestId: pendingRequestId, approved: true });
+  joinRequest.hidden = true;
+});
+document.querySelector("#deny-join").addEventListener("click", () => {
+  send({ type: "resolve_join", requestId: pendingRequestId, approved: false });
+  joinRequest.hidden = true;
+  connectionStatus.textContent = "Запрос отклонён. Ждём другого игрока…";
+});
+
 document.querySelector("#cancel-room").addEventListener("click", () => {
-  destroyPeer();
+  send({ type: "leave_room" });
+  activeRoomCode = "";
+  gameMode = "local";
   sessionOptions.hidden = false;
   roomWaiting.hidden = true;
+  joinRequest.hidden = true;
   setSessionError();
+  send({ type: "list_rooms" });
 });
 
 document.querySelector("#copy-room-code").addEventListener("click", async () => {
@@ -370,6 +469,7 @@ profileForm.addEventListener("submit", (event) => {
   nickname = nextName;
   localStorage.setItem("genblox:nickname", nickname);
   profileName.textContent = nickname;
+  send({ type: "hello", nickname });
   closeDialog(profileDialog);
 });
 
@@ -379,9 +479,12 @@ document.querySelectorAll("[data-close]").forEach((button) => {
   });
 });
 
-document.querySelector("#close-game").addEventListener("click", () => closeDialog(gameDialog));
-document.querySelector("#next-round").addEventListener("click", () => startRound(true));
-document.querySelector("#reset-score").addEventListener("click", () => resetScore());
+document.querySelector("#close-game").addEventListener(
+  "click",
+  () => closeDialog(gameDialog),
+);
+nextRoundButton.addEventListener("click", () => startRound(true));
+resetScoreButton.addEventListener("click", () => resetScore());
 cells.forEach((cell) => cell.addEventListener("click", playCell));
 
 [sessionDialog, profileDialog, gameDialog].forEach((dialog) => {
@@ -397,7 +500,7 @@ roomCodeInput.addEventListener("input", () => {
     .slice(0, 6);
 });
 roomCodeInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") connectToRoom();
+  if (event.key === "Enter") requestJoin(roomCodeInput.value);
 });
 
 boardElement.addEventListener("keydown", (event) => {
@@ -414,5 +517,8 @@ boardElement.addEventListener("keydown", (event) => {
   }
 });
 
-window.addEventListener("beforeunload", destroyPeer);
+window.addEventListener("beforeunload", () => {
+  send({ type: "leave_room" });
+});
+
 renderGame();

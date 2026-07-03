@@ -10,7 +10,7 @@
     />
     <title>GenBlox — выбирай спейс</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js" defer></script>
+    <script src="./config.js" defer></script>
     <script src="./app.js" defer></script>
   </head>
   <body>
@@ -131,9 +131,15 @@
         </header>
 
         <div class="session-options" id="session-options">
-          <button class="session-option" id="create-room" type="button">
+          <button class="session-option" id="create-public-room" type="button">
             <span class="option-icon">＋</span>
-            <span><strong>Создать комнату</strong><small>Получи код и позови друга</small></span>
+            <span><strong>Открытая комната</strong><small>Появится в списке доступных игр</small></span>
+            <b>→</b>
+          </button>
+
+          <button class="session-option" id="create-room" type="button">
+            <span class="option-icon private-icon">#</span>
+            <span><strong>Приватная комната</strong><small>Вход только по шестизначному коду</small></span>
             <b>→</b>
           </button>
 
@@ -144,6 +150,16 @@
               <button class="primary-button" id="connect-room" type="button">Войти</button>
             </div>
             <small>Введи шестизначный код с экрана друга</small>
+          </div>
+
+          <div class="public-rooms">
+            <div class="public-rooms-heading">
+              <span>Открытые комнаты</span>
+              <button id="refresh-rooms" type="button">Обновить</button>
+            </div>
+            <div class="public-room-list" id="public-room-list">
+              <p>Подключаемся к серверу…</p>
+            </div>
           </div>
 
           <button class="session-option compact" id="local-game" type="button">
@@ -160,6 +176,13 @@
             <small>Нажми, чтобы скопировать</small>
           </button>
           <div class="connection-status"><i></i><span id="connection-status">Создаём комнату…</span></div>
+          <div class="join-request" id="join-request" hidden>
+            <p><strong id="requester-name">guest</strong> хочет присоединиться</p>
+            <div>
+              <button class="secondary-button" id="deny-join" type="button">Отклонить</button>
+              <button class="primary-button" id="approve-join" type="button">Принять</button>
+            </div>
+          </div>
           <button class="secondary-button" id="cancel-room" type="button">Отменить</button>
         </div>
 
