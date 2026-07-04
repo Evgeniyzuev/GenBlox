@@ -2,230 +2,107 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#161527" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#151425" />
     <meta
       name="description"
-      content="GenBlox — маленькие игровые пространства, созданные игроками."
+      content="GenBlox — маленькие многопользовательские игры прямо в браузере."
     />
-    <title>GenBlox — выбирай спейс</title>
+    <title>GenBlox — крестики-нолики</title>
     <link rel="stylesheet" href="./styles.css" />
     <script
-      src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.108.2/dist/umd/supabase.min.js"
-      defer
+      src="https://unpkg.com/playroomkit/multiplayer.full.umd.js"
+      crossorigin="anonymous"
     ></script>
-    <script src="./config.js" defer></script>
-    <script src="/api/config.js" defer></script>
     <script type="module" src="./js/app.js"></script>
   </head>
   <body>
-    <div class="sky" aria-hidden="true">
-      <span class="star star-a"></span>
-      <span class="star star-b"></span>
-      <span class="star star-c"></span>
-      <span class="cloud cloud-a"></span>
-      <span class="cloud cloud-b"></span>
-    </div>
-
     <header class="topbar">
       <a class="brand" href="#" aria-label="GenBlox — на главную">
         <span class="brand-cube" aria-hidden="true"></span>
         <span>GEN<span>BLOX</span></span>
       </a>
-
-      <nav class="main-nav" aria-label="Основная навигация">
-        <button class="nav-item is-active" type="button">Спейсы</button>
-        <button class="nav-item" type="button" disabled>Создать <small>скоро</small></button>
-      </nav>
-
-      <button class="profile" id="profile-button" type="button" aria-label="Изменить никнейм">
-        <span class="profile-face" aria-hidden="true">:)</span>
-        <span class="profile-copy">
-          <strong id="profile-name">guest</strong>
-          <small>онлайн</small>
-        </span>
-      </button>
+      <span class="build-label">EARLY BUILD</span>
     </header>
 
     <main>
       <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow"><span></span> Играй. Строй. Зови друзей.</p>
-          <h1>Выбери свой<br /><em>следующий спейс</em></h1>
-          <p class="hero-text">
-            Маленькие миры, большие идеи. Заходи в игру прямо из браузера.
+        <div>
+          <p class="eyebrow">ИГРАЙ ВМЕСТЕ</p>
+          <h1>Маленькие игры.<br /><em>Один общий спейс.</em></h1>
+          <p>
+            Создай комнату Playroom, отправь другу код или QR и играйте с разных
+            устройств — без регистрации и собственной базы данных.
           </p>
         </div>
-
         <div class="hero-art" aria-hidden="true">
-          <div class="moon"></div>
-          <div class="floating-block block-one"><i>×</i></div>
-          <div class="floating-block block-two"><i>○</i></div>
-          <div class="island">
-            <span class="tree"></span>
-            <span class="tiny-player"></span>
-          </div>
+          <span>×</span><span>○</span>
         </div>
       </section>
 
       <section class="spaces" aria-labelledby="spaces-title">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Доступно сейчас</p>
-            <h2 id="spaces-title">Популярные спейсы</h2>
+            <p class="eyebrow">СПЕЙС 001</p>
+            <h2 id="spaces-title">Крестики-нолики</h2>
           </div>
-          <span class="online-pill"><i></i> 3 спейса доступны</span>
+          <span class="online-pill"><i></i> PlayroomKit</span>
         </div>
 
-        <div class="space-grid" id="space-grid"></div>
+        <article class="space-card">
+          <div class="card-preview" aria-hidden="true">
+            <div class="preview-grid">
+              <span>×</span><span></span><span>○</span>
+              <span></span><span>×</span><span></span>
+              <span>○</span><span></span><span>×</span>
+            </div>
+          </div>
+          <div class="card-copy">
+            <p>Классическая партия 3 × 3 для двух игроков.</p>
+            <button class="primary-button" id="play-button" type="button">
+              Играть онлайн
+            </button>
+          </div>
+        </article>
       </section>
     </main>
 
-    <footer class="site-footer">
-      <span>GENBLOX // EARLY BUILD 001</span>
-      <span>Сделано из блоков и хороших идей</span>
-    </footer>
-
-    <dialog class="menu-dialog" id="session-dialog">
-      <div class="dialog-panel">
-        <header class="game-header">
-          <div>
-            <p class="section-kicker" id="session-game-kicker">Крестики-нолики</p>
-            <h2 id="session-game-title">Как будем играть?</h2>
-          </div>
-          <button class="close-button" data-close="session-dialog" type="button" aria-label="Закрыть">×</button>
-        </header>
-
-        <div class="session-options" id="session-options">
-          <button class="session-option" id="create-public-room" data-network-only type="button">
-            <span class="option-icon">＋</span>
-            <span><strong>Открытая комната</strong><small>Появится в списке доступных игр</small></span>
-            <b>→</b>
-          </button>
-
-          <button class="session-option" id="create-room" data-network-only type="button">
-            <span class="option-icon private-icon">#</span>
-            <span><strong>Приватная комната</strong><small>Вход только по шестизначному коду</small></span>
-            <b>→</b>
-          </button>
-
-          <div class="join-option" data-network-only>
-            <label for="room-code">Подключиться к комнате</label>
-            <div class="code-row">
-              <input id="room-code" type="text" maxlength="6" autocomplete="off" placeholder="КОД123" />
-              <button class="primary-button" id="connect-room" type="button">Войти</button>
-            </div>
-            <small>Введи шестизначный код с экрана друга</small>
-          </div>
-
-          <div class="public-rooms" data-network-only>
-            <div class="public-rooms-heading">
-              <span>Открытые комнаты</span>
-              <button id="refresh-rooms" type="button">Обновить</button>
-            </div>
-            <div class="public-room-list" id="public-room-list">
-              <p>Подключаемся к серверу…</p>
-            </div>
-          </div>
-
-          <button class="session-option compact" id="local-game" type="button">
-            <span class="option-icon">⌨</span>
-            <span><strong id="local-mode-title">На одном устройстве</strong><small id="local-mode-description">Передавайте ход друг другу</small></span>
-            <b>→</b>
-          </button>
-        </div>
-
-        <div class="room-waiting" id="room-waiting" hidden>
-          <p class="waiting-label">Код твоей комнаты</p>
-          <button class="room-code-display" id="copy-room-code" type="button" title="Скопировать код">
-            <strong id="created-room-code">------</strong>
-            <small>Нажми, чтобы скопировать</small>
-          </button>
-          <div class="connection-status"><i></i><span id="connection-status">Создаём комнату…</span></div>
-          <div class="join-request" id="join-request" hidden>
-            <p><strong id="requester-name">guest</strong> хочет присоединиться</p>
-            <div>
-              <button class="secondary-button" id="deny-join" type="button">Отклонить</button>
-              <button class="primary-button" id="approve-join" type="button">Принять</button>
-            </div>
-          </div>
-          <button class="secondary-button" id="cancel-room" type="button">Отменить</button>
-        </div>
-
-        <p class="session-error" id="session-error" aria-live="polite"></p>
-      </div>
-    </dialog>
-
-    <dialog class="menu-dialog profile-dialog" id="profile-dialog">
-      <form class="dialog-panel" id="profile-form">
-        <header class="game-header">
-          <div>
-            <p class="section-kicker">Профиль</p>
-            <h2>Твой никнейм</h2>
-          </div>
-          <button class="close-button" data-close="profile-dialog" type="button" aria-label="Закрыть">×</button>
-        </header>
-        <label class="nickname-field" for="nickname">
-          Имя в игровых комнатах
-          <input id="nickname" type="text" minlength="2" maxlength="16" autocomplete="nickname" />
-        </label>
-        <p class="field-hint">Хранится только в этом браузере.</p>
-        <button class="primary-button save-profile" type="submit">Сохранить</button>
-      </form>
-    </dialog>
-
-    <dialog class="game-dialog" id="game-dialog">
+    <dialog id="game-dialog">
       <div class="game-shell">
         <header class="game-header">
           <div>
-            <p class="section-kicker" id="game-space-number">Спейс 001</p>
-            <h2 id="game-title">Крестики-нолики</h2>
+            <p class="eyebrow">СПЕЙС 001</p>
+            <h2>Крестики-нолики</h2>
           </div>
-          <button class="close-button" id="close-game" type="button" aria-label="Закрыть игру">×</button>
+          <button class="icon-button" id="close-game" type="button" aria-label="Закрыть">×</button>
         </header>
 
-        <div class="scoreboard" aria-label="Счёт игроков">
-          <div class="player-card player-x is-turn" data-player="X">
-            <span class="player-mark">×</span>
-            <span><small id="name-x">Игрок 1</small><strong id="label-x">Крестики</strong></span>
-            <b id="score-x">0</b>
+        <div class="room-info">
+          <span id="role-label">Подключение…</span>
+          <span id="players-label">Игроков: 1 / 2</span>
+        </div>
+
+        <div class="scoreboard">
+          <div class="player-card" data-player="X">
+            <span>×</span><small>Хозяин комнаты</small><strong id="score-x">0</strong>
           </div>
-          <div class="round-label">Раунд <strong id="round-number">1</strong></div>
-          <div class="player-card player-o" data-player="O">
-            <span class="player-mark">○</span>
-            <span><small id="name-o">Игрок 2</small><strong id="label-o">Нолики</strong></span>
-            <b id="score-o">0</b>
+          <div class="player-card" data-player="O">
+            <span>○</span><small>Второй игрок</small><strong id="score-o">0</strong>
           </div>
         </div>
 
-        <p class="game-status" id="game-status" aria-live="polite">Ход крестиков</p>
-        <div class="battle-layout" id="battle-layout">
-          <section class="battle-field own-field" id="own-field" hidden>
-            <h3>Твоё поле</h3>
-            <div class="game-board is-large is-battle" id="own-board" role="grid" aria-label="Своё поле"></div>
-          </section>
-          <section class="battle-field target-field">
-            <h3 id="target-field-title" hidden>Поле противника</h3>
-            <div class="game-board" id="game-board" role="grid" aria-label="Игровое поле"></div>
-          </section>
-        </div>
-
-        <div class="placement-controls" id="placement-controls" hidden>
-          <p id="placement-status">Размести корабль</p>
-          <div>
-            <button class="secondary-button" id="rotate-ship" type="button">↻ Повернуть</button>
-            <button class="secondary-button" id="auto-place" type="button">Авто</button>
-            <button class="secondary-button" id="clear-fleet" type="button">Очистить</button>
-            <button class="primary-button" id="ready-fleet" type="button">Готов</button>
-          </div>
-        </div>
+        <p class="game-status" id="game-status" aria-live="polite">Ждём второго игрока…</p>
+        <div class="game-board" id="game-board" role="grid" aria-label="Поле крестиков-ноликов"></div>
 
         <div class="game-actions">
-          <button class="secondary-button" id="reset-score" type="button">Сбросить счёт</button>
-          <button class="primary-button" id="next-round" type="button">Новый раунд</button>
+          <button class="secondary-button" id="new-round" type="button">Новый раунд</button>
         </div>
-        <p class="game-hint" id="game-hint">Сейчас играют двое за одним устройством</p>
+        <p class="game-hint" id="game-hint">
+          Код комнаты и QR доступны в лобби Playroom перед запуском.
+        </p>
       </div>
     </dialog>
+
+    <footer>GENBLOX // Один спейс, одна понятная архитектура</footer>
   </body>
 </html>
