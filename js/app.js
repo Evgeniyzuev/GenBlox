@@ -196,8 +196,8 @@ async function connectRoom({ matchmaking = false, roomCode = "", kind }, trigger
   }
 
   const code = normalizeRoomCode(roomCode);
-  if (roomCode && code.length < 4) {
-    setRoomStatus("Проверь код комнаты: в нём должно быть не меньше четырёх символов.", true);
+  if (roomCode && code.length < 3) {
+    setRoomStatus("Проверь код комнаты: в нём должно быть не меньше трёх символов.", true);
     elements.roomCodeInput.focus();
     return;
   }
