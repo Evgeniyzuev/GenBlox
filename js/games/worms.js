@@ -27,6 +27,8 @@ export class WormsGame {
   constructor(root, callbacks = {}) {
     this.root = root;
     this.callbacks = callbacks;
+    this.network = callbacks.network ?? null;
+    this.networkRole = this.network?.role ?? "solo";
     this.canvas = document.createElement("canvas");
     this.canvas.className = "worms-canvas";
     this.canvas.width = 960;
@@ -46,6 +48,14 @@ export class WormsGame {
     this.state = "maps";
     this.selectedWeapon = "pistol";
     this.lastTime = performance.now();
+    this.networkClock = 0;
+    this.inputClock = 0;
+    this.localInput = { move: 0, aim: -0.35, weapon: "pistol", jumpSeq: 0, fireSeq: 0 };
+    this.jumpHeld = false;
+    this.lastRemoteJumpSeq = 0;
+    this.lastRemoteFireSeq = 0;
+    this.terrainEvents = [];
+    this.appliedTerrainEvents = 0;
     this.bindEvents();
     this.buildMapChoice();
     this.buildToolbar();
@@ -66,8 +76,12 @@ export class WormsGame {
       button.style.setProperty("--map-b", map.colors[1]);
       button.innerHTML = `<span></span><strong>${map.title}</strong><small>${map.subtitle}</small>`;
       button.addEventListener("click", () => this.start(map.id));
+      button.disabled = this.networkRole === "guest";
       this.mapChoice.append(button);
     });
+    if (this.networkRole === "guest") {
+      heading.innerHTML = "<small>СЕТЕВАЯ ДУЭЛЬ</small><strong>Хозяин выбирает карту…</strong>";
+    }
   }
 
   buildToolbar() {
@@ -102,7 +116,7 @@ export class WormsGame {
     this.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
   }
 
-  start(mapId) {
+  start(mapId, publish = true) {
     this.state = "playing";
     this.mapId = mapId;
     this.mapChoice.hidden = true;
@@ -113,6 +127,8 @@ export class WormsGame {
     this.particles = [];
     this.blocks = [];
     this.crates = [];
+    this.terrainEvents = [];
+    this.appliedTerrainEvents = 0;
     this.message = "БОЙ!";
     this.messageTime = 1.2;
     this.terrain = this.createTerrain(mapId);
@@ -121,7 +137,15 @@ export class WormsGame {
     this.player.y = this.groundAt(this.player.x) - this.player.radius;
     this.enemy.y = this.groundAt(this.enemy.x) - this.enemy.radius;
     this.updateToolbar();
-    this.callbacks.onStatus?.("120 HP · уничтожь синего червячка");
+    const local = this.localWorm;
+    if (this.networkRole === "guest") {
+      local.name = "Ты";
+      this.player.name = "Хост";
+    } else if (this.networkRole === "host") {
+      this.enemy.name = "Соперник";
+    }
+    this.callbacks.onStatus?.("120 HP · уничтожь червячка соперника");
+    if (publish && this.networkRole === "host") this.publishSnapshot();
   }
 
   createWorm(x, color, name) {
@@ -162,17 +186,28 @@ export class WormsGame {
     return ground;
   }
 
+  get localWorm() {
+    return this.networkRole === "guest" ? this.enemy : this.player;
+  }
+
+  get remoteWorm() {
+    return this.networkRole === "guest" ? this.player : this.enemy;
+  }
+
   selectWeapon(id) {
     if (this.state !== "playing") return;
     this.selectedWeapon = id;
+    this.localInput.weapon = id;
+    if (this.networkRole === "guest") this.sendNetworkInput(true);
     this.updateToolbar();
   }
 
   updateToolbar() {
-    if (!this.player) return;
+    const worm = this.localWorm;
+    if (!worm) return;
     [...this.toolbar.children].forEach((button) => {
       const weapon = WEAPONS.find((item) => item.id === button.dataset.weapon);
-      const ammo = this.player.ammo[weapon.id];
+      const ammo = worm.ammo[weapon.id];
       button.classList.toggle("is-selected", weapon.id === this.selectedWeapon);
       button.disabled = ammo !== Infinity && ammo <= 0;
       button.querySelector("small").textContent = ammo === Infinity ? "∞" : ammo;
@@ -215,20 +250,36 @@ export class WormsGame {
   }
 
   setAimFromPointer(point) {
-    this.player.aim = Math.atan2(point.y - this.player.y, point.x - this.player.x);
-    this.player.facing = Math.cos(this.player.aim) >= 0 ? 1 : -1;
+    const worm = this.localWorm;
+    worm.aim = Math.atan2(point.y - worm.y, point.x - worm.x);
+    worm.facing = Math.cos(worm.aim) >= 0 ? 1 : -1;
+    this.localInput.aim = worm.aim;
   }
 
   jump() {
-    if (this.player?.grounded) {
-      this.player.vy = -285;
-      this.player.grounded = false;
+    const worm = this.localWorm;
+    if (this.networkRole === "guest") {
+      this.localInput.jumpSeq += 1;
+      this.sendNetworkInput(true);
+      return;
+    }
+    if (worm?.grounded) {
+      worm.vy = -285;
+      worm.grounded = false;
     }
   }
 
   fire() {
-    if (this.state !== "playing" || this.player.cooldown > 0) return;
-    this.useWeapon(this.player, this.selectedWeapon, this.player.aim);
+    const worm = this.localWorm;
+    if (this.state !== "playing" || worm.cooldown > 0) return;
+    if (this.networkRole === "guest") {
+      this.localInput.fireSeq += 1;
+      this.localInput.weapon = this.selectedWeapon;
+      this.localInput.aim = worm.aim;
+      this.sendNetworkInput(true);
+      return;
+    }
+    this.useWeapon(worm, this.selectedWeapon, worm.aim);
   }
 
   useWeapon(worm, id, angle) {
@@ -271,7 +322,7 @@ export class WormsGame {
       worm.cooldown = 0.35;
     }
     if (ammo !== Infinity) worm.ammo[id] -= 1;
-    if (worm === this.player) this.updateToolbar();
+    if (worm === this.localWorm) this.updateToolbar();
   }
 
   hitscan(worm, angle) {
@@ -321,6 +372,7 @@ export class WormsGame {
       const depth = Math.sqrt(Math.max(0, radius * radius - dx * dx));
       if (this.terrain[column] < y + depth) this.terrain[column] = clamp(y + depth, this.terrain[column], 540);
     }
+    if (this.networkRole === "host") this.terrainEvents.push({ x, y, radius });
   }
 
   burst(x, y, color, count) {
@@ -456,8 +508,130 @@ export class WormsGame {
       this.mapChoice.hidden = false;
       this.toolbar.hidden = true;
       this.callbacks.onStatus?.("Выбери одну из трёх карт");
+      if (this.networkRole === "host") {
+        this.network.publish?.({ kind: "worms", phase: "selecting", revision: Date.now() });
+      }
     });
     this.root.append(restart);
+    if (this.networkRole === "host") this.publishSnapshot();
+  }
+
+  sendNetworkInput(force = false) {
+    if (this.networkRole !== "guest" || !this.network) return;
+    if (!force && this.inputClock < 0.05) return;
+    this.inputClock = 0;
+    this.network.sendInput?.({ ...this.localInput, sentAt: Date.now() });
+  }
+
+  serializeWorm(worm) {
+    return {
+      x: worm.x, y: worm.y, vx: worm.vx, vy: worm.vy,
+      hp: worm.hp, armor: worm.armor, grounded: worm.grounded,
+      facing: worm.facing, aim: worm.aim, cooldown: worm.cooldown,
+      ammo: { ...worm.ammo },
+      rope: worm.rope ? { ...worm.rope } : null,
+    };
+  }
+
+  applyWormState(worm, state) {
+    if (!worm || !state) return;
+    Object.assign(worm, state, { ammo: { ...state.ammo } });
+  }
+
+  createSnapshot() {
+    return {
+      kind: "worms",
+      phase: this.state,
+      mapId: this.mapId,
+      tick: Math.round(this.time * 60),
+      revision: Date.now(),
+      player: this.serializeWorm(this.player),
+      enemy: this.serializeWorm(this.enemy),
+      projectiles: this.projectiles.map(({ owner, ...projectile }) => ({
+        ...projectile,
+        ownerSide: owner === this.player ? "player" : "enemy",
+      })),
+      crates: this.crates.map((crate) => ({ ...crate })),
+      blocks: this.blocks.map((block) => ({ ...block })),
+      terrainEvents: this.terrainEvents.map((event) => ({ ...event })),
+      message: this.message,
+      messageTime: Number.isFinite(this.messageTime) ? this.messageTime : 999,
+    };
+  }
+
+  publishSnapshot() {
+    if (this.networkRole !== "host" || !this.network || !this.player) return;
+    this.network.publish?.(this.createSnapshot());
+  }
+
+  applyNetworkSnapshot(snapshot) {
+    if (this.networkRole !== "guest" || !snapshot || snapshot.kind !== "worms") return;
+    if (snapshot.phase === "selecting") {
+      this.state = "maps";
+      this.mapChoice.hidden = false;
+      this.toolbar.hidden = true;
+      this.callbacks.onStatus?.("Хозяин комнаты выбирает карту…");
+      return;
+    }
+    if (!this.player || this.mapId !== snapshot.mapId) this.start(snapshot.mapId, false);
+    this.applyWormState(this.player, snapshot.player);
+    this.applyWormState(this.enemy, snapshot.enemy);
+    this.projectiles = (snapshot.projectiles ?? []).map((projectile) => ({
+      ...projectile,
+      owner: projectile.ownerSide === "player" ? this.player : this.enemy,
+    }));
+    this.crates = (snapshot.crates ?? []).map((crate) => ({ ...crate }));
+    this.blocks = (snapshot.blocks ?? []).map((block) => ({ ...block }));
+    const events = snapshot.terrainEvents ?? [];
+    for (let index = this.appliedTerrainEvents; index < events.length; index += 1) {
+      const event = events[index];
+      this.crater(event.x, event.y, event.radius);
+    }
+    this.appliedTerrainEvents = events.length;
+    this.time = (snapshot.tick ?? 0) / 60;
+    this.message = snapshot.message === "ПОБЕДА!"
+      ? "ПОРАЖЕНИЕ"
+      : snapshot.message === "ПОРАЖЕНИЕ"
+        ? "ПОБЕДА!"
+        : snapshot.message ?? "";
+    this.messageTime = snapshot.messageTime ?? 0;
+    this.state = snapshot.phase === "finished" ? "finished" : "playing";
+    if (this.state === "finished") {
+      this.callbacks.onStatus?.(this.message === "ПОБЕДА!" ? "Ты победил!" : "Хозяин комнаты победил");
+    }
+    this.updateToolbar();
+  }
+
+  updateNetworkHost(dt, localMove) {
+    this.updateWorm(this.player, dt, localMove);
+    if (localMove) this.player.facing = Math.sign(localMove);
+
+    const remoteInput = this.network.getRemoteInput?.();
+    const move = clamp(Number(remoteInput?.move) || 0, -1, 1);
+    this.enemy.aim = Number.isFinite(remoteInput?.aim) ? remoteInput.aim : this.enemy.aim;
+    this.enemy.facing = Math.cos(this.enemy.aim) >= 0 ? 1 : -1;
+    this.updateWorm(this.enemy, dt, move);
+
+    if (remoteInput?.jumpSeq > this.lastRemoteJumpSeq) {
+      this.lastRemoteJumpSeq = remoteInput.jumpSeq;
+      if (this.enemy.grounded) {
+        this.enemy.vy = -285;
+        this.enemy.grounded = false;
+      }
+    }
+    if (remoteInput?.fireSeq > this.lastRemoteFireSeq) {
+      this.lastRemoteFireSeq = remoteInput.fireSeq;
+      const weapon = WEAPONS.some((item) => item.id === remoteInput.weapon) ? remoteInput.weapon : "pistol";
+      if (this.enemy.cooldown <= 0) this.useWeapon(this.enemy, weapon, this.enemy.aim);
+    }
+
+    this.updateProjectiles(dt);
+    this.updateCrates(dt);
+    this.networkClock += dt;
+    if (this.networkClock >= 1 / 12) {
+      this.networkClock = 0;
+      this.publishSnapshot();
+    }
   }
 
   update(dt) {
@@ -470,12 +644,27 @@ export class WormsGame {
     for (const pointer of this.pointers.values()) {
       if (pointer.side === "move") input += clamp((pointer.x - pointer.startX) / 55, -1, 1);
     }
-    if ((this.keys.has("w") || this.keys.has("arrowup")) && this.player.grounded) this.jump();
-    this.updateWorm(this.player, dt, clamp(input, -1, 1));
-    if (input) this.player.facing = Math.sign(input);
-    this.updateAI(dt);
-    this.updateProjectiles(dt);
-    this.updateCrates(dt);
+    input = clamp(input, -1, 1);
+    const wantsJump = this.keys.has("w") || this.keys.has("arrowup");
+    if (wantsJump && !this.jumpHeld && this.localWorm.grounded) this.jump();
+    this.jumpHeld = wantsJump;
+
+    if (this.networkRole === "guest") {
+      this.localInput.move = input;
+      this.localInput.aim = this.localWorm.aim;
+      this.inputClock += dt;
+      this.sendNetworkInput();
+      return;
+    }
+
+    if (this.networkRole === "host") this.updateNetworkHost(dt, input);
+    else {
+      this.updateWorm(this.player, dt, input);
+      if (input) this.player.facing = Math.sign(input);
+      this.updateAI(dt);
+      this.updateProjectiles(dt);
+      this.updateCrates(dt);
+    }
     this.particles = this.particles.filter((particle) => {
       particle.life -= dt;
       if (particle.type === "dot") {
@@ -606,8 +795,9 @@ export class WormsGame {
       context.strokeStyle = "rgba(255,255,255,.55)";
       context.setLineDash([7, 7]);
       context.beginPath();
-      context.moveTo(this.player.x, this.player.y);
-      context.lineTo(this.player.x + Math.cos(this.player.aim) * 78, this.player.y + Math.sin(this.player.aim) * 78);
+      const worm = this.localWorm;
+      context.moveTo(worm.x, worm.y);
+      context.lineTo(worm.x + Math.cos(worm.aim) * 78, worm.y + Math.sin(worm.aim) * 78);
       context.stroke();
       context.setLineDash([]);
     }

@@ -277,7 +277,7 @@ function showConnectedRoom() {
   elements.roomButtonLabel.textContent = `Комната ${code}`;
   elements.playSoloButtons.forEach((button) => { button.hidden = true; });
   elements.launchButtons.forEach((button) => {
-    button.hidden = button.dataset.game === "worms";
+    button.hidden = false;
   });
   updateUrlRoomCode(code);
   renderQr(link);
@@ -304,6 +304,21 @@ function syncRoom() {
     setupRoomLabels();
     openOverlay(elements.gameDialog, "game");
     const game = client.getGameState(activeGameId);
+    if (activeGameId === "worms") {
+      if (!wormsGame) {
+        wormsGame = new WormsGame(elements.wormsStage, {
+          onStatus: (message) => { elements.wormsStatus.textContent = message; },
+          network: {
+            role: client.isHost ? "host" : "guest",
+            publish: (snapshot) => client.setGameState("worms", snapshot, false),
+            sendInput: (input) => client.setLocalPlayerState("worms:input", input, false),
+            getRemoteInput: () => client.getRemotePlayerState("worms:input"),
+          },
+        });
+      }
+      wormsGame.applyNetworkSnapshot(game);
+      return;
+    }
     if (isValidGameState(game)) renderGame(game, client.playerCount, roomPlayerSide());
   } else if (elements.gameDialog.open && mode === "room") {
     closeGameFromSync();
@@ -348,12 +363,9 @@ function setupGameShell() {
     wormsGame = null;
     buildBoard(activeGameId);
   } else if (mode === "room") {
-    elements.wormsStatus.textContent = "Сетевая версия ещё не подключена";
-    elements.wormsStage.innerHTML = `
-      <div class="worms-room-unavailable">
-        <p><strong>Сетевая дуэль ещё не подключена</strong>
-        Вернись в каталог и запусти «Червячков» кнопкой «Играть против компьютера».</p>
-      </div>`;
+    elements.wormsStatus.textContent = client.isHost
+      ? "Выбери карту для сетевого матча"
+      : "Хозяин комнаты выбирает карту…";
   }
   selectedChecker = null;
   lastRevision = -1;
@@ -408,8 +420,22 @@ function openSoloGame(gameId) {
 }
 
 function launchForRoom(gameId) {
-  if (gameId === "worms") return;
   activeGameId = gameId;
+  if (gameId === "worms") {
+    client.setGameState("worms", {
+      kind: "worms",
+      phase: "selecting",
+      revision: Date.now(),
+    });
+    const revision = (client.getRoomState()?.revision ?? 0) + 1;
+    client.setRoomState({
+      screen: "game",
+      activeGame: "worms",
+      startedAt: Date.now(),
+      revision,
+    });
+    return;
+  }
   const previous = client.getGameState(activeGameId);
   lastRevision = -1;
   client.setGameState(activeGameId, createGameForActive(previous));

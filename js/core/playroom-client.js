@@ -41,6 +41,12 @@ export class PlayroomClient {
   get playerCount() { return Math.max(1, this.#players.size); }
   get roomCode() { return this.#api.getRoomCode?.() ?? "—"; }
   get started() { return this.#started; }
+  get localPlayer() { return this.#api.myPlayer?.() ?? null; }
+  get players() { return [...this.#players.values()]; }
+  get remotePlayers() {
+    const localId = this.localPlayer?.id;
+    return this.players.filter((player) => player.id !== localId);
+  }
   onDisconnect(listener) {
     this.#disconnectListeners.add(listener);
     return () => this.#disconnectListeners.delete(listener);
@@ -48,5 +54,13 @@ export class PlayroomClient {
   getRoomState() { return this.#api.getState(ROOM_KEY); }
   setRoomState(state) { this.#api.setState(ROOM_KEY, state, true); }
   getGameState(gameId = "tic-tac-toe") { return this.#api.getState(`${GAME_KEY_PREFIX}${gameId}`); }
-  setGameState(gameId, state) { this.#api.setState(`${GAME_KEY_PREFIX}${gameId}`, state, true); }
+  setGameState(gameId, state, reliable = true) {
+    this.#api.setState(`${GAME_KEY_PREFIX}${gameId}`, state, reliable);
+  }
+  setLocalPlayerState(key, value, reliable = false) {
+    this.localPlayer?.setState?.(key, value, reliable);
+  }
+  getRemotePlayerState(key) {
+    return this.remotePlayers[0]?.getState?.(key) ?? null;
+  }
 }
