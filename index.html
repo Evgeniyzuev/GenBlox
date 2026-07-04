@@ -14,6 +14,10 @@
       src="https://unpkg.com/playroomkit/multiplayer.full.umd.js"
       crossorigin="anonymous"
     ></script>
+    <script
+      src="https://unpkg.com/qrcodejs@1.0.0/qrcode.min.js"
+      crossorigin="anonymous"
+    ></script>
     <script type="module" src="./js/app.js"></script>
   </head>
   <body>
@@ -22,7 +26,9 @@
         <span class="brand-cube" aria-hidden="true"></span>
         <span>GEN<span>BLOX</span></span>
       </a>
-      <span class="build-label">EARLY BUILD</span>
+      <button class="room-button" id="open-room-menu" type="button">
+        <i></i><span id="room-button-label">Комнаты</span>
+      </button>
     </header>
 
     <main>
@@ -72,23 +78,71 @@
               <button class="secondary-button" id="play-solo" type="button">
                 Играть одному
               </button>
-              <button class="primary-button" id="find-public-room" type="button">
-                Найти открытую комнату
-              </button>
-              <button class="secondary-button" id="create-private-room" type="button">
-                Создать приватную
-              </button>
               <button class="primary-button" id="launch-for-room" type="button" hidden>
                 Запустить для всей комнаты
               </button>
             </div>
             <small class="card-hint">
-              Открытая игра найдётся автоматически. В приватную друга можно пригласить кодом или QR.
+              Без комнаты игра запускается против компьютера. Подключение игроков находится в меню «Комнаты».
             </small>
           </div>
         </article>
       </section>
     </main>
+
+    <dialog class="menu-dialog" id="room-dialog">
+      <div class="menu-shell">
+        <header class="game-header">
+          <div>
+            <p class="eyebrow">МУЛЬТИПЛЕЕР</p>
+            <h2 id="room-dialog-title">Комнаты</h2>
+          </div>
+          <button class="icon-button" data-close-dialog="room-dialog" type="button" aria-label="Закрыть">×</button>
+        </header>
+
+        <section id="room-disconnected">
+          <p class="menu-description">Создай приватную комнату, подключись по коду или найди свободного игрока.</p>
+          <div class="room-menu-actions">
+            <button class="primary-button room-action" id="find-public-room" type="button">
+              <span>Найти открытую комнату</span>
+              <small>Подключимся к ожидающему игроку или создадим новую</small>
+            </button>
+            <button class="secondary-button room-action" id="create-private-room" type="button">
+              <span>Создать приватную комнату</span>
+              <small>Получишь код, ссылку и QR для приглашения</small>
+            </button>
+          </div>
+
+          <form class="join-form" id="join-room-form">
+            <label for="room-code">Подключиться по коду</label>
+            <div>
+              <input id="room-code" name="roomCode" maxlength="8" autocomplete="off" placeholder="ABCD" />
+              <button class="primary-button" type="submit">Войти</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="room-connected" hidden>
+          <div class="connected-room-card">
+            <span>Код комнаты</span>
+            <strong id="room-code-display">—</strong>
+            <small id="room-kind-label">Приватная комната</small>
+          </div>
+          <p id="room-player-count">Игроков: 1 / 2</p>
+          <div class="invite-box">
+            <div id="room-qr" aria-label="QR-код приглашения"></div>
+            <div>
+              <p>Приглашение</p>
+              <input id="invite-link" readonly />
+              <button class="secondary-button" id="copy-invite" type="button">Копировать ссылку</button>
+            </div>
+          </div>
+          <button class="danger-button" id="leave-room" type="button">Выйти из комнаты</button>
+        </section>
+
+        <p class="menu-status" id="room-status" aria-live="polite"></p>
+      </div>
+    </dialog>
 
     <dialog id="game-dialog">
       <div class="game-shell">

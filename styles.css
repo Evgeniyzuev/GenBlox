@@ -63,7 +63,18 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--cyan); outline-
   transform: rotate(8deg);
 }
 
-.build-label { color: var(--muted); font-size: 11px; letter-spacing: 2px; }
+.room-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  cursor: pointer;
+  font-weight: 700;
+}
+.room-button i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.room-button.is-connected i { background: var(--lime); box-shadow: 0 0 9px var(--lime); }
 main { width: min(1020px, calc(100% - 40px)); margin: auto; }
 
 .hero {
@@ -143,6 +154,7 @@ h2 { margin: 0; font-size: clamp(28px, 4vw, 40px); letter-spacing: -2px; }
 }
 .primary-button { color: #171525; background: var(--lime); box-shadow: 5px 5px #647f2e; }
 .secondary-button { border: 1px solid var(--line); background: var(--panel-2); }
+.danger-button { width: 100%; margin-top: 18px; padding: 12px; border: 1px solid rgba(255,102,140,.5); color: var(--pink); background: rgba(255,102,140,.08); cursor: pointer; font-weight: 800; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 
 dialog {
@@ -155,6 +167,32 @@ dialog {
 }
 dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
 .game-shell { padding: 28px; }
+.menu-shell { padding: 28px; }
+.menu-description { color: var(--muted); line-height: 1.55; }
+.room-menu-actions { display: grid; gap: 12px; margin: 24px 0; }
+.room-action { display: grid; gap: 5px; width: 100%; text-align: left; }
+.room-action small { opacity: .7; font-weight: 500; }
+.join-form { display: grid; gap: 9px; padding-top: 20px; border-top: 1px solid var(--line); font-weight: 700; }
+.join-form > div { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+.join-form input, .invite-box input {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: #171625;
+  font: inherit;
+}
+.join-form input { text-transform: uppercase; letter-spacing: 3px; }
+.connected-room-card { display: grid; place-items: center; gap: 6px; margin: 24px 0 14px; padding: 22px; background: var(--panel-2); }
+.connected-room-card span, .connected-room-card small, #room-player-count { color: var(--muted); }
+.connected-room-card strong { color: var(--lime); font-size: 38px; letter-spacing: 6px; }
+.invite-box { display: grid; grid-template-columns: 132px 1fr; align-items: center; gap: 20px; margin-top: 18px; padding: 18px; border: 1px solid var(--line); }
+#room-qr { display: grid; place-items: center; width: 132px; height: 132px; padding: 6px; background: white; }
+#room-qr img, #room-qr canvas { max-width: 120px; max-height: 120px; }
+.invite-box > div:last-child { display: grid; gap: 10px; min-width: 0; }
+.invite-box p { margin: 0; font-weight: 800; }
+.menu-status { min-height: 20px; margin: 16px 0 0; color: var(--muted); font-size: 12px; }
+.menu-status.is-error { color: var(--pink); }
 .game-header { display: flex; align-items: start; justify-content: space-between; }
 .icon-button { width: 42px; height: 42px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; font-size: 25px; }
 .room-info { display: flex; justify-content: space-between; margin: 22px 0 12px; color: var(--muted); font-size: 12px; }
@@ -188,4 +226,7 @@ footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--mut
   .scoreboard { grid-template-columns: 1fr; }
   .room-info { flex-direction: column; gap: 5px; }
   .game-shell { padding: 20px; }
+  .menu-shell { padding: 20px; }
+  .invite-box { grid-template-columns: 1fr; }
+  #room-qr { margin: auto; }
 }

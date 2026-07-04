@@ -6,37 +6,56 @@ import {
   playMove,
 } from "./games/tic-tac-toe.js";
 
+const $ = (selector) => document.querySelector(selector);
 const elements = {
-  playSolo: document.querySelector("#play-solo"),
-  findPublic: document.querySelector("#find-public-room"),
-  createPrivate: document.querySelector("#create-private-room"),
-  launchForRoom: document.querySelector("#launch-for-room"),
-  partyPanel: document.querySelector("#party-panel"),
-  partyCode: document.querySelector("#party-code"),
-  partyPlayers: document.querySelector("#party-players"),
-  dialog: document.querySelector("#game-dialog"),
-  close: document.querySelector("#close-game"),
-  board: document.querySelector("#game-board"),
-  status: document.querySelector("#game-status"),
-  role: document.querySelector("#role-label"),
-  players: document.querySelector("#players-label"),
-  nameX: document.querySelector("#name-x"),
-  nameO: document.querySelector("#name-o"),
-  scoreX: document.querySelector("#score-x"),
-  scoreO: document.querySelector("#score-o"),
-  newRound: document.querySelector("#new-round"),
-  hint: document.querySelector("#game-hint"),
+  openRoomMenu: $("#open-room-menu"),
+  roomButtonLabel: $("#room-button-label"),
+  roomDialog: $("#room-dialog"),
+  roomTitle: $("#room-dialog-title"),
+  disconnected: $("#room-disconnected"),
+  connected: $("#room-connected"),
+  findPublic: $("#find-public-room"),
+  createPrivate: $("#create-private-room"),
+  joinForm: $("#join-room-form"),
+  roomCodeInput: $("#room-code"),
+  roomCodeDisplay: $("#room-code-display"),
+  roomKind: $("#room-kind-label"),
+  roomPlayerCount: $("#room-player-count"),
+  roomStatus: $("#room-status"),
+  roomQr: $("#room-qr"),
+  inviteLink: $("#invite-link"),
+  copyInvite: $("#copy-invite"),
+  leaveRoom: $("#leave-room"),
+  playSolo: $("#play-solo"),
+  launchForRoom: $("#launch-for-room"),
+  partyPanel: $("#party-panel"),
+  partyCode: $("#party-code"),
+  partyPlayers: $("#party-players"),
+  gameDialog: $("#game-dialog"),
+  closeGame: $("#close-game"),
+  board: $("#game-board"),
+  gameStatus: $("#game-status"),
+  role: $("#role-label"),
+  players: $("#players-label"),
+  nameX: $("#name-x"),
+  nameO: $("#name-o"),
+  scoreX: $("#score-x"),
+  scoreO: $("#score-o"),
+  newRound: $("#new-round"),
+  hint: $("#game-hint"),
   cards: [...document.querySelectorAll(".player-card")],
 };
 
-const roomButtons = [elements.findPublic, elements.createPrivate];
+const connectionButtons = [elements.findPublic, elements.createPrivate, elements.joinForm.querySelector("button")];
 let client = null;
+let roomKind = null;
 let mode = "catalog";
 let localGame = null;
 let lastRevision = -1;
 let lastPlayerCount = -1;
 let syncTimer = null;
 let computerTimer = null;
+let suppressGameReturn = false;
 
 function buildBoard() {
   elements.board.replaceChildren();
@@ -52,8 +71,173 @@ function buildBoard() {
   }
 }
 
-function openDialog() {
-  if (!elements.dialog.open) elements.dialog.showModal();
+function openOverlay(dialog, name) {
+  if (dialog.open) return;
+  history.pushState({ ...(history.state ?? {}), overlay: name }, "");
+  dialog.showModal();
+}
+
+function closeOverlay(dialog, name) {
+  if (!dialog.open) return;
+  if (history.state?.overlay === name) history.back();
+  else dialog.close();
+}
+
+function closeGameFromSync() {
+  if (!elements.gameDialog.open) return;
+  if (history.state?.overlay === "game") {
+    suppressGameReturn = true;
+    history.back();
+  } else {
+    elements.gameDialog.close();
+  }
+}
+
+function setRoomStatus(message = "", isError = false) {
+  elements.roomStatus.textContent = message;
+  elements.roomStatus.classList.toggle("is-error", isError);
+}
+
+function normalizeRoomCode(value) {
+  return value.trim().replace(/\s+/g, "").toUpperCase();
+}
+
+function roomCodeFromUrl() {
+  const params = new URLSearchParams(location.hash.replace(/^#/, ""));
+  return normalizeRoomCode(params.get("r") ?? "");
+}
+
+function inviteUrl(code) {
+  const url = new URL(location.href);
+  url.hash = new URLSearchParams({ r: code }).toString();
+  return url.toString();
+}
+
+function updateUrlRoomCode(code) {
+  const url = new URL(location.href);
+  url.hash = code ? new URLSearchParams({ r: code }).toString() : "";
+  history.replaceState(history.state, "", url);
+}
+
+function renderQr(link) {
+  elements.roomQr.replaceChildren();
+  if (!window.QRCode) {
+    elements.roomQr.textContent = "QR недоступен";
+    return;
+  }
+  new window.QRCode(elements.roomQr, {
+    text: link,
+    width: 120,
+    height: 120,
+    correctLevel: window.QRCode.CorrectLevel.M,
+  });
+}
+
+async function connectRoom({ matchmaking = false, roomCode = "", kind }, trigger) {
+  if (client?.started) {
+    showConnectedRoom();
+    return;
+  }
+
+  const code = normalizeRoomCode(roomCode);
+  if (roomCode && code.length < 4) {
+    setRoomStatus("Проверь код комнаты: в нём должно быть не меньше четырёх символов.", true);
+    elements.roomCodeInput.focus();
+    return;
+  }
+
+  const originalLabel = trigger.textContent;
+  connectionButtons.forEach((button) => { button.disabled = true; });
+  trigger.textContent = matchmaking ? "Ищем…" : code ? "Подключаемся…" : "Создаём…";
+  setRoomStatus(matchmaking ? "Ищем свободную открытую комнату…" : "Подключаемся к Playroom…");
+
+  try {
+    client ??= new PlayroomClient();
+    await client.start({ matchmaking, roomCode: code || undefined });
+    roomKind = kind;
+
+    client.onDisconnect((event) => {
+      clearInterval(syncTimer);
+      setRoomStatus(`Соединение потеряно: ${event?.reason || "комната закрыта"}.`, true);
+      elements.roomButtonLabel.textContent = "Нет соединения";
+      elements.openRoomMenu.classList.remove("is-connected");
+      openOverlay(elements.roomDialog, "room");
+    });
+
+    if (client.isHost && !client.getRoomState()) {
+      client.setRoomState({ screen: "catalog", activeGame: null, revision: 1 });
+    }
+
+    mode = "room";
+    showConnectedRoom();
+    startRoomSync();
+    setRoomStatus("Комната подключена.");
+  } catch (error) {
+    console.error(error);
+    const full = error?.message === "ROOM_LIMIT_EXCEEDED";
+    setRoomStatus(full ? "Эта комната уже заполнена." : "Не удалось подключиться. Проверь код и попробуй ещё раз.", true);
+  } finally {
+    connectionButtons.forEach((button) => { button.disabled = false; });
+    trigger.textContent = originalLabel;
+  }
+}
+
+function showConnectedRoom() {
+  const code = client.roomCode;
+  const link = inviteUrl(code);
+  elements.disconnected.hidden = true;
+  elements.connected.hidden = false;
+  elements.roomTitle.textContent = "Текущая комната";
+  elements.roomCodeDisplay.textContent = code;
+  elements.roomKind.textContent = roomKind === "public" ? "Открытая комната" : "Приватная комната";
+  elements.inviteLink.value = link;
+  elements.partyPanel.hidden = false;
+  elements.partyCode.textContent = `Код: ${code}`;
+  elements.openRoomMenu.classList.add("is-connected");
+  elements.roomButtonLabel.textContent = `Комната ${code}`;
+  elements.playSolo.hidden = true;
+  elements.launchForRoom.hidden = false;
+  updateUrlRoomCode(code);
+  renderQr(link);
+  renderParty();
+}
+
+function startRoomSync() {
+  clearInterval(syncTimer);
+  syncRoom();
+  syncTimer = setInterval(syncRoom, 120);
+}
+
+function syncRoom() {
+  if (!client?.started) return;
+  renderParty();
+  const room = client.getRoomState();
+
+  if (room?.screen === "game" && room.activeGame === "tic-tac-toe") {
+    mode = "room";
+    setupRoomLabels();
+    openOverlay(elements.gameDialog, "game");
+    const game = client.getGameState();
+    if (isGameState(game)) renderGame(game, client.playerCount, client.mark);
+  } else if (elements.gameDialog.open && mode === "room") {
+    closeGameFromSync();
+  }
+}
+
+function renderParty() {
+  if (!client) return;
+  const text = `Игроков: ${Math.min(client.playerCount, 2)} / 2`;
+  elements.partyPlayers.textContent = text;
+  elements.roomPlayerCount.textContent = text;
+}
+
+function setupRoomLabels() {
+  elements.role.textContent = client.isHost ? "Ты играешь за ×" : "Ты играешь за ○";
+  elements.players.textContent = `Игроков: ${Math.min(client.playerCount, 2)} / 2`;
+  elements.nameX.textContent = "Хозяин комнаты";
+  elements.nameO.textContent = "Второй игрок";
+  elements.newRound.hidden = !client.isHost;
+  elements.hint.textContent = "Кнопка × завершает игру и возвращает всю комнату в каталог.";
 }
 
 function openSoloGame() {
@@ -66,83 +250,20 @@ function openSoloGame() {
   elements.newRound.hidden = false;
   elements.hint.textContent = "Закрой игру, чтобы вернуться в каталог.";
   lastRevision = -1;
-  openDialog();
+  openOverlay(elements.gameDialog, "game");
   renderGame(localGame, 2, "X");
-}
-
-async function connectRoom(matchmaking, trigger) {
-  const originalLabel = trigger.textContent;
-  roomButtons.forEach((button) => { button.disabled = true; });
-  trigger.textContent = matchmaking ? "Ищем комнату…" : "Создаём комнату…";
-
-  try {
-    client ??= new PlayroomClient();
-    await client.start({ matchmaking });
-    mode = "room";
-    showConnectedRoom();
-    startRoomSync();
-  } catch (error) {
-    console.error(error);
-    alert(error instanceof Error ? error.message : "Не удалось открыть Playroom.");
-  } finally {
-    roomButtons.forEach((button) => { button.disabled = false; });
-    trigger.textContent = originalLabel;
-  }
-}
-
-function showConnectedRoom() {
-  elements.partyPanel.hidden = false;
-  elements.partyCode.textContent = `Код: ${client.roomCode}`;
-  elements.findPublic.hidden = true;
-  elements.createPrivate.hidden = true;
-  elements.launchForRoom.hidden = false;
-  renderParty();
-}
-
-function startRoomSync() {
-  clearInterval(syncTimer);
-  syncRoom();
-  syncTimer = setInterval(syncRoom, 120);
-}
-
-function syncRoom() {
-  if (!client) return;
-  renderParty();
-  const room = client.getRoomState();
-
-  if (room?.screen === "game" && room.activeGame === "tic-tac-toe") {
-    mode = "room";
-    setupRoomLabels();
-    openDialog();
-    const game = client.getGameState();
-    if (isGameState(game)) renderGame(game, client.playerCount, client.mark);
-  } else if (elements.dialog.open && mode === "room") {
-    elements.dialog.close();
-  }
-}
-
-function renderParty() {
-  if (!client) return;
-  elements.partyPlayers.textContent = `Игроков: ${Math.min(client.playerCount, 2)} / 2`;
-}
-
-function setupRoomLabels() {
-  elements.role.textContent = client.isHost ? "Ты играешь за ×" : "Ты играешь за ○";
-  elements.players.textContent = `Игроков: ${Math.min(client.playerCount, 2)} / 2`;
-  elements.nameX.textContent = "Хозяин комнаты";
-  elements.nameO.textContent = "Второй игрок";
-  elements.newRound.hidden = !client.isHost;
-  elements.hint.textContent = "Закрытие игры вернёт всю комнату в каталог.";
 }
 
 function launchForRoom() {
   const previous = client.getGameState();
   lastRevision = -1;
   client.setGameState(createGame(isGameState(previous) ? previous : null));
+  const revision = (client.getRoomState()?.revision ?? 0) + 1;
   client.setRoomState({
     screen: "game",
     activeGame: "tic-tac-toe",
     startedAt: Date.now(),
+    revision,
   });
 }
 
@@ -165,8 +286,7 @@ function makeMove(index) {
 function queueComputerMove() {
   clearTimeout(computerTimer);
   if (localGame.winner || localGame.turn !== "O") return;
-  elements.status.textContent = "Компьютер думает…";
-
+  elements.gameStatus.textContent = "Компьютер думает…";
   computerTimer = setTimeout(() => {
     const index = chooseComputerMove(localGame);
     if (index >= 0) localGame = playMove(localGame, index, "O");
@@ -185,26 +305,25 @@ function renderGame(game, playerCount, myMark) {
     cell.className = `cell${mark ? ` mark-${mark.toLowerCase()}` : ""}${game.winningLine.includes(index) ? " is-win" : ""}`;
     cell.disabled = Boolean(mark || game.winner || playerCount < 2 || game.turn !== myMark);
   });
-
   elements.scoreX.textContent = game.scores.X;
   elements.scoreO.textContent = game.scores.O;
-  elements.cards.forEach((card) => {
-    card.classList.toggle("is-turn", !game.winner && card.dataset.player === game.turn);
-  });
+  elements.cards.forEach((card) => card.classList.toggle("is-turn", !game.winner && card.dataset.player === game.turn));
 
-  if (playerCount < 2) elements.status.textContent = "Ждём второго игрока…";
-  else if (game.winner === "draw") elements.status.textContent = "Ничья!";
-  else if (game.winner) elements.status.textContent = game.winner === myMark ? "Ты победил!" : "Победил соперник";
-  else elements.status.textContent = game.turn === myMark ? "Твой ход" : "Ход соперника";
+  if (playerCount < 2) elements.gameStatus.textContent = "Ждём второго игрока…";
+  else if (game.winner === "draw") elements.gameStatus.textContent = "Ничья!";
+  else if (game.winner) elements.gameStatus.textContent = game.winner === myMark ? "Ты победил!" : "Победил соперник";
+  else elements.gameStatus.textContent = game.turn === myMark ? "Твой ход" : "Ход соперника";
 }
 
-function closeGame() {
+function requestCloseGame() {
   clearTimeout(computerTimer);
   if (mode === "room" && client) {
-    client.setRoomState({ screen: "catalog", activeGame: null, returnedAt: Date.now() });
+    if (!confirm("Завершить игру и вернуть всю комнату в каталог?")) return;
+    const revision = (client.getRoomState()?.revision ?? 0) + 1;
+    client.setRoomState({ screen: "catalog", activeGame: null, returnedAt: Date.now(), revision });
+    closeGameFromSync();
   } else {
-    elements.dialog.close();
-    mode = "catalog";
+    closeOverlay(elements.gameDialog, "game");
   }
 }
 
@@ -215,16 +334,74 @@ function startNewRound() {
     renderGame(localGame, 2, "X");
     return;
   }
-
   const current = client?.getGameState();
   if (client?.isHost && isGameState(current)) client.setGameState(createGame(current));
 }
 
+function leaveRoom() {
+  const extra = elements.gameDialog.open ? " Активная игра также будет закрыта." : "";
+  if (!confirm(`Выйти из комнаты?${extra}`)) return;
+  clearInterval(syncTimer);
+  const url = new URL(location.href);
+  url.hash = "";
+  location.replace(url.toString());
+}
+
+async function copyInvite() {
+  try {
+    await navigator.clipboard.writeText(elements.inviteLink.value);
+    setRoomStatus("Ссылка скопирована.");
+  } catch {
+    elements.inviteLink.select();
+    setRoomStatus("Выделили ссылку — скопируй её вручную.");
+  }
+}
+
+function handlePopState() {
+  if (elements.gameDialog.open) {
+    elements.gameDialog.close();
+    if (mode === "room" && client && !suppressGameReturn) {
+      const revision = (client.getRoomState()?.revision ?? 0) + 1;
+      client.setRoomState({ screen: "catalog", activeGame: null, returnedAt: Date.now(), revision });
+    }
+    suppressGameReturn = false;
+    if (mode === "solo") mode = "catalog";
+    return;
+  }
+  if (elements.roomDialog.open) elements.roomDialog.close();
+}
+
+elements.openRoomMenu.addEventListener("click", () => openOverlay(elements.roomDialog, "room"));
+elements.findPublic.addEventListener("click", () => connectRoom({ matchmaking: true, kind: "public" }, elements.findPublic));
+elements.createPrivate.addEventListener("click", () => connectRoom({ kind: "private" }, elements.createPrivate));
+elements.joinForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  connectRoom({ roomCode: elements.roomCodeInput.value, kind: "private" }, elements.joinForm.querySelector("button"));
+});
+elements.copyInvite.addEventListener("click", copyInvite);
+elements.leaveRoom.addEventListener("click", leaveRoom);
 elements.playSolo.addEventListener("click", openSoloGame);
-elements.findPublic.addEventListener("click", () => connectRoom(true, elements.findPublic));
-elements.createPrivate.addEventListener("click", () => connectRoom(false, elements.createPrivate));
 elements.launchForRoom.addEventListener("click", launchForRoom);
-elements.close.addEventListener("click", closeGame);
+elements.closeGame.addEventListener("click", requestCloseGame);
 elements.newRound.addEventListener("click", startNewRound);
+document.querySelectorAll("[data-close-dialog]").forEach((button) => {
+  button.addEventListener("click", () => closeOverlay(document.getElementById(button.dataset.closeDialog), "room"));
+});
+elements.roomDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeOverlay(elements.roomDialog, "room");
+});
+elements.gameDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  requestCloseGame();
+});
+window.addEventListener("popstate", handlePopState);
 
 buildBoard();
+
+const invitedCode = roomCodeFromUrl();
+if (invitedCode) {
+  elements.roomCodeInput.value = invitedCode;
+  setRoomStatus(`Приглашение в комнату ${invitedCode}. Нажми «Войти».`);
+  openOverlay(elements.roomDialog, "room");
+}
