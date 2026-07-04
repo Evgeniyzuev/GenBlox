@@ -203,8 +203,25 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
 .player-card small { color: var(--muted); }
 .player-card.is-turn { border-color: var(--lime); }
 .game-status { min-height: 24px; margin: 20px 0 12px; text-align: center; font-weight: 700; }
-.game-board { width: min(100%, 390px); aspect-ratio: 1; gap: 7px; margin: auto; }
-.cell { border: 1px solid var(--line); background: #302e4c; cursor: pointer; font-size: clamp(44px, 12vw, 78px); font-weight: 900; }
+.game-board {
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  width: min(100%, 390px);
+  aspect-ratio: 1;
+  gap: 7px;
+  margin: auto;
+}
+.cell {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #302e4c;
+  cursor: pointer;
+  font-size: clamp(44px, 12vw, 78px);
+  font-weight: 900;
+  line-height: 1;
+}
 .cell.mark-x { color: var(--pink); }
 .cell.mark-o { color: var(--cyan); }
 .cell.is-win { border-color: var(--lime); background: rgba(183,243,74,.12); }

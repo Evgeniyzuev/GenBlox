@@ -7,12 +7,16 @@ const WINNING_LINES = [
 ];
 
 export function createGame(previous = null) {
+  const round = (previous?.round ?? 0) + 1;
+  const starter = round % 2 === 1 ? MARKS.HOST : MARKS.GUEST;
+
   return {
     board: Array(9).fill(""),
-    turn: MARKS.HOST,
+    turn: starter,
+    starter,
     winner: null,
     winningLine: [],
-    round: (previous?.round ?? 0) + 1,
+    round,
     scores: previous?.scores ?? { X: 0, O: 0 },
     revision: (previous?.revision ?? 0) + 1,
   };

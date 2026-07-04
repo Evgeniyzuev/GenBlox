@@ -252,6 +252,7 @@ function openSoloGame() {
   lastRevision = -1;
   openOverlay(elements.gameDialog, "game");
   renderGame(localGame, 2, "X");
+  queueComputerMove();
 }
 
 function launchForRoom() {
@@ -332,6 +333,7 @@ function startNewRound() {
     localGame = createGame(localGame);
     lastRevision = -1;
     renderGame(localGame, 2, "X");
+    queueComputerMove();
     return;
   }
   const current = client?.getGameState();
