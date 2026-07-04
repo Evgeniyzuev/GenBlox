@@ -1,5 +1,5 @@
 const ROOM_KEY = "genblox:room";
-const GAME_KEY = "genblox:game:tic-tac-toe";
+const GAME_KEY_PREFIX = "genblox:game:";
 
 export class PlayroomClient {
   #api;
@@ -47,6 +47,6 @@ export class PlayroomClient {
   }
   getRoomState() { return this.#api.getState(ROOM_KEY); }
   setRoomState(state) { this.#api.setState(ROOM_KEY, state, true); }
-  getGameState() { return this.#api.getState(GAME_KEY); }
-  setGameState(state) { this.#api.setState(GAME_KEY, state, true); }
+  getGameState(gameId = "tic-tac-toe") { return this.#api.getState(`${GAME_KEY_PREFIX}${gameId}`); }
+  setGameState(gameId, state) { this.#api.setState(`${GAME_KEY_PREFIX}${gameId}`, state, true); }
 }

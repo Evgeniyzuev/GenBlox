@@ -135,6 +135,7 @@ h2 { margin: 0; font-size: clamp(28px, 4vw, 40px); letter-spacing: -2px; }
   background: rgba(33,31,54,.92);
   box-shadow: 0 24px 70px rgba(0,0,0,.25);
 }
+.space-list { display: grid; gap: 24px; }
 
 .card-preview { display: grid; place-items: center; min-height: 280px; background: linear-gradient(135deg, #302c54, #1c1a30); }
 .preview-grid, .game-board { display: grid; grid-template-columns: repeat(3, 1fr); }
@@ -143,6 +144,7 @@ h2 { margin: 0; font-size: clamp(28px, 4vw, 40px); letter-spacing: -2px; }
 .preview-grid span:nth-child(3n) { color: var(--cyan); }
 .card-copy { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 42px; }
 .card-copy p { margin: 0 0 24px; color: var(--muted); line-height: 1.6; }
+.card-copy h2 { margin-bottom: 12px; }
 .card-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .card-hint { max-width: 440px; margin-top: 18px; color: var(--muted); line-height: 1.5; }
 
@@ -159,6 +161,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 
 dialog {
   width: min(620px, calc(100% - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
   padding: 0;
   border: 1px solid var(--line);
   color: var(--ink);
@@ -194,6 +198,7 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
 .menu-status { min-height: 20px; margin: 16px 0 0; color: var(--muted); font-size: 12px; }
 .menu-status.is-error { color: var(--pink); }
 .game-header { display: flex; align-items: start; justify-content: space-between; }
+.game-header-actions { display: flex; gap: 8px; }
 .icon-button { width: 42px; height: 42px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; font-size: 25px; }
 .room-info { display: flex; justify-content: space-between; margin: 22px 0 12px; color: var(--muted); font-size: 12px; }
 .scoreboard { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -225,6 +230,68 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
 .cell.mark-x { color: var(--pink); }
 .cell.mark-o { color: var(--cyan); }
 .cell.is-win { border-color: var(--lime); background: rgba(183,243,74,.12); }
+.cell:disabled, .checkers-cell:disabled { opacity: 1; cursor: default; }
+.game-board.is-checkers {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-rows: repeat(8, minmax(0, 1fr));
+  width: min(100%, 480px);
+  gap: 0;
+  border: 5px solid #171525;
+  background: #171525;
+}
+.checkers-cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: #d7bf91;
+}
+.checkers-cell.is-dark { background: #665177; cursor: pointer; }
+.checkers-cell.is-selected { box-shadow: inset 0 0 0 4px var(--lime); }
+.checkers-cell.is-target::after {
+  position: absolute;
+  width: 20%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  content: "";
+  background: var(--lime);
+  box-shadow: 0 0 12px rgba(183,243,74,.8);
+}
+.checker-piece {
+  position: relative;
+  z-index: 1;
+  width: 70%;
+  aspect-ratio: 1;
+  border: 3px solid rgba(255,255,255,.22);
+  border-radius: 50%;
+  background: #171525;
+  box-shadow: inset 0 -7px rgba(0,0,0,.3), 0 3px 5px rgba(0,0,0,.35);
+}
+.checker-piece.white { border-color: rgba(255,255,255,.8); background: #eee9dd; }
+.checker-piece.king::after {
+  position: absolute;
+  inset: 24%;
+  border: 3px solid var(--lime);
+  border-radius: 50%;
+  content: "";
+}
+.mini-checkers { display: grid; grid-template-columns: repeat(4, 1fr); width: 180px; aspect-ratio: 1; }
+.mini-checkers i { position: relative; background: #d7bf91; }
+.mini-checkers i.dark { background: #665177; }
+.mini-checkers i.black::after, .mini-checkers i.white::after {
+  position: absolute;
+  inset: 20%;
+  border-radius: 50%;
+  content: "";
+  background: #171525;
+}
+.mini-checkers i.white::after { background: #eee9dd; }
+.help-content { color: var(--muted); line-height: 1.65; }
+.help-content h3 { margin: 24px 0 8px; color: var(--ink); }
+.help-content ul { padding-left: 20px; }
 .game-actions { display: flex; justify-content: center; margin-top: 18px; }
 .game-hint { margin: 14px 0 0; color: var(--muted); font-size: 11px; text-align: center; }
 footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; letter-spacing: 2px; text-align: center; }

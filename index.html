@@ -58,13 +58,14 @@
 
         <div class="section-heading">
           <div>
-            <p class="eyebrow">СПЕЙС 001</p>
-            <h2 id="spaces-title">Крестики-нолики</h2>
+            <p class="eyebrow">КАТАЛОГ</p>
+            <h2 id="spaces-title">Игровые спейсы</h2>
           </div>
           <span class="online-pill"><i></i> PlayroomKit</span>
         </div>
 
-        <article class="space-card">
+        <div class="space-list">
+          <article class="space-card">
           <div class="card-preview" aria-hidden="true">
             <div class="preview-grid">
               <span>×</span><span></span><span>○</span>
@@ -75,10 +76,10 @@
           <div class="card-copy">
             <p>Классическая партия 3 × 3 для двух игроков.</p>
             <div class="card-actions">
-              <button class="secondary-button" id="play-solo" type="button">
+              <button class="secondary-button play-solo" data-game="tic-tac-toe" type="button">
                 Играть одному
               </button>
-              <button class="primary-button" id="launch-for-room" type="button" hidden>
+              <button class="primary-button launch-for-room" data-game="tic-tac-toe" type="button" hidden>
                 Запустить для всей комнаты
               </button>
             </div>
@@ -86,7 +87,32 @@
               Без комнаты игра запускается против компьютера. Подключение игроков находится в меню «Комнаты».
             </small>
           </div>
-        </article>
+          </article>
+
+          <article class="space-card">
+          <div class="card-preview checkers-preview" aria-hidden="true">
+            <div class="mini-checkers">
+              <i></i><i class="dark"></i><i></i><i class="dark white"></i>
+              <i class="dark black"></i><i></i><i class="dark"></i><i></i>
+              <i></i><i class="dark"></i><i></i><i class="dark white"></i>
+              <i class="dark black"></i><i></i><i class="dark"></i><i></i>
+            </div>
+          </div>
+          <div class="card-copy">
+            <p class="eyebrow">СПЕЙС 002</p>
+            <h2>Шашки</h2>
+            <p>Русские шашки на поле 8 × 8 с обязательным взятием и дамками.</p>
+            <div class="card-actions">
+              <button class="secondary-button play-solo" data-game="checkers" type="button">
+                Играть одному
+              </button>
+              <button class="primary-button launch-for-room" data-game="checkers" type="button" hidden>
+                Запустить для всей комнаты
+              </button>
+            </div>
+          </div>
+          </article>
+        </div>
       </section>
     </main>
 
@@ -148,10 +174,13 @@
       <div class="game-shell">
         <header class="game-header">
           <div>
-            <p class="eyebrow">СПЕЙС 001</p>
-            <h2>Крестики-нолики</h2>
+            <p class="eyebrow" id="game-kicker">СПЕЙС 001</p>
+            <h2 id="game-title">Крестики-нолики</h2>
           </div>
-          <button class="icon-button" id="close-game" type="button" aria-label="Вернуться в каталог">×</button>
+          <div class="game-header-actions">
+            <button class="icon-button" id="open-game-help" type="button" aria-label="Правила игры">?</button>
+            <button class="icon-button" id="close-game" type="button" aria-label="Вернуться в каталог">×</button>
+          </div>
         </header>
 
         <div class="room-info">
@@ -161,10 +190,10 @@
 
         <div class="scoreboard">
           <div class="player-card" data-player="X">
-            <span>×</span><small id="name-x">Игрок</small><strong id="score-x">0</strong>
+            <span id="mark-x">×</span><small id="name-x">Игрок</small><strong id="score-x">0</strong>
           </div>
           <div class="player-card" data-player="O">
-            <span>○</span><small id="name-o">Соперник</small><strong id="score-o">0</strong>
+            <span id="mark-o">○</span><small id="name-o">Соперник</small><strong id="score-o">0</strong>
           </div>
         </div>
 
@@ -180,6 +209,19 @@
       </div>
     </dialog>
 
-    <footer>GENBLOX // Один спейс, одна понятная архитектура</footer>
+    <dialog class="menu-dialog help-dialog" id="help-dialog">
+      <div class="menu-shell">
+        <header class="game-header">
+          <div>
+            <p class="eyebrow">КАК ИГРАТЬ</p>
+            <h2 id="help-title">Правила</h2>
+          </div>
+          <button class="icon-button" id="close-game-help" type="button" aria-label="Закрыть справку">×</button>
+        </header>
+        <div class="help-content" id="help-content"></div>
+      </div>
+    </dialog>
+
+    <footer>GENBLOX // Маленькие игры, одна общая комната</footer>
   </body>
 </html>

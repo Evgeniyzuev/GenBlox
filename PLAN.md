@@ -262,7 +262,8 @@ app-shell
 ├── invite-controller           код, ссылка, камера, изображение QR
 ├── game-registry               список независимых спейсов
 └── games
-    └── tic-tac-toe             правила, UI, локальный компьютер
+    ├── tic-tac-toe             правила и локальный компьютер
+    └── checkers                русские шашки и локальный компьютер
 ```
 
 PlayroomKit используется только через `playroom-client`. Игры не вызывают SDK
