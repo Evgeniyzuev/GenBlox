@@ -98,6 +98,9 @@ const elements = {
   closeGame: $("#close-game"),
   board: $("#game-board"),
   wormsStage: $("#worms-stage"),
+  classicGameView: $("#classic-game-view"),
+  wormsGameView: $("#worms-game-view"),
+  wormsStatus: $("#worms-status"),
   gameStatus: $("#game-status"),
   role: $("#role-label"),
   players: $("#players-label"),
@@ -273,7 +276,9 @@ function showConnectedRoom() {
   elements.openRoomMenu.classList.add("is-connected");
   elements.roomButtonLabel.textContent = `Комната ${code}`;
   elements.playSoloButtons.forEach((button) => { button.hidden = true; });
-  elements.launchButtons.forEach((button) => { button.hidden = false; });
+  elements.launchButtons.forEach((button) => {
+    button.hidden = button.dataset.game === "worms";
+  });
   updateUrlRoomCode(code);
   renderQr(link);
   renderParty();
@@ -332,17 +337,24 @@ function setupGameShell() {
   elements.helpTitle.textContent = `Правила: ${game.title}`;
   elements.helpContent.innerHTML = game.help;
   const isWorms = activeGameId === "worms";
-  elements.board.hidden = isWorms;
-  elements.wormsStage.hidden = !isWorms;
-  elements.scoreboard.hidden = isWorms;
-  elements.roomInfo.hidden = isWorms;
-  elements.gameActions.hidden = isWorms;
-  elements.hint.hidden = isWorms;
+  elements.classicGameView.hidden = isWorms;
+  elements.wormsGameView.hidden = !isWorms;
   elements.gameDialog.classList.toggle("is-worms", isWorms);
   elements.board.setAttribute("aria-label", `Поле игры «${game.title}»`);
   elements.markX.textContent = activeGameId === "checkers" ? "●" : "×";
   elements.markO.textContent = activeGameId === "checkers" ? "○" : "○";
-  if (!isWorms) buildBoard(activeGameId);
+  if (!isWorms) {
+    wormsGame?.destroy();
+    wormsGame = null;
+    buildBoard(activeGameId);
+  } else if (mode === "room") {
+    elements.wormsStatus.textContent = "Сетевая версия ещё не подключена";
+    elements.wormsStage.innerHTML = `
+      <div class="worms-room-unavailable">
+        <p><strong>Сетевая дуэль ещё не подключена</strong>
+        Вернись в каталог и запусти «Червячков» кнопкой «Играть против компьютера».</p>
+      </div>`;
+  }
   selectedChecker = null;
   lastRevision = -1;
 }
@@ -369,11 +381,11 @@ function openSoloGame(gameId) {
   mode = "solo";
   if (activeGameId === "worms") {
     setupGameShell();
-    elements.gameStatus.textContent = "Выбери одну из трёх карт";
+    elements.wormsStatus.textContent = "Выбери одну из трёх карт";
     openOverlay(elements.gameDialog, "game");
     wormsGame?.destroy();
     wormsGame = new WormsGame(elements.wormsStage, {
-      onStatus: (message) => { elements.gameStatus.textContent = message; },
+      onStatus: (message) => { elements.wormsStatus.textContent = message; },
     });
     elements.gameDialog.requestFullscreen?.()
       .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))

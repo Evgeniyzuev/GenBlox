@@ -15,6 +15,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   min-width: 320px;
@@ -355,6 +356,25 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   touch-action: none;
 }
 .worms-stage[hidden] { display: none; }
+.worms-room-unavailable {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 280px;
+  padding: 32px;
+  color: var(--muted);
+  background:
+    radial-gradient(circle at 50% 35%, rgba(148,120,255,.22), transparent 30%),
+    #171525;
+  line-height: 1.6;
+  text-align: center;
+}
+.worms-room-unavailable strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--lime);
+  font-size: clamp(20px, 4vw, 34px);
+}
 .worms-canvas {
   display: block;
   width: 100%;
@@ -475,7 +495,15 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
 #game-dialog.is-worms .game-header { flex: 0 0 auto; align-items: center; padding: 0 4px 5px; }
 #game-dialog.is-worms .game-header h2 { font-size: clamp(18px, 3vw, 30px); }
 #game-dialog.is-worms .game-header .eyebrow { margin-bottom: 3px; }
-#game-dialog.is-worms .game-status { min-height: 17px; margin: 0 0 4px; font-size: 11px; }
+#worms-game-view {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+#game-dialog.is-worms #worms-game-view {
+  display: flex;
+  flex-direction: column;
+}
+#game-dialog.is-worms .worms-status { flex: 0 0 auto; min-height: 17px; margin: 0 0 4px; font-size: 11px; }
 #game-dialog.is-worms .worms-stage { flex: 1 1 auto; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
 #game-dialog.is-worms .worms-canvas { width: 100%; height: 100%; object-fit: contain; }
 .help-content { color: var(--muted); line-height: 1.65; }
@@ -507,7 +535,7 @@ footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--mut
 @media (max-height: 520px) and (orientation: landscape) {
   #game-dialog.is-worms .game-header h2 { font-size: 17px; }
   #game-dialog.is-worms .game-header .eyebrow,
-  #game-dialog.is-worms .game-status { display: none; }
+  #game-dialog.is-worms .worms-status { display: none; }
   #game-dialog.is-worms .icon-button { width: 34px; height: 34px; font-size: 19px; }
   .worms-toolbar button { min-height: 46px; }
   .worms-toolbar span { display: none; }

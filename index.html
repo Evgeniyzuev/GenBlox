@@ -208,30 +208,36 @@
           </div>
         </header>
 
-        <div class="room-info">
-          <span id="role-label">Подключение…</span>
-          <span id="players-label">Игроков: 1 / 2</span>
-        </div>
-
-        <div class="scoreboard">
-          <div class="player-card" data-player="X">
-            <span id="mark-x">×</span><small id="name-x">Игрок</small><strong id="score-x">0</strong>
+        <section id="classic-game-view">
+          <div class="room-info">
+            <span id="role-label">Подключение…</span>
+            <span id="players-label">Игроков: 1 / 2</span>
           </div>
-          <div class="player-card" data-player="O">
-            <span id="mark-o">○</span><small id="name-o">Соперник</small><strong id="score-o">0</strong>
+
+          <div class="scoreboard">
+            <div class="player-card" data-player="X">
+              <span id="mark-x">×</span><small id="name-x">Игрок</small><strong id="score-x">0</strong>
+            </div>
+            <div class="player-card" data-player="O">
+              <span id="mark-o">○</span><small id="name-o">Соперник</small><strong id="score-o">0</strong>
+            </div>
           </div>
-        </div>
 
-        <p class="game-status" id="game-status" aria-live="polite">Ждём второго игрока…</p>
-        <div class="game-board" id="game-board" role="grid" aria-label="Поле крестиков-ноликов"></div>
-        <div class="worms-stage" id="worms-stage" hidden></div>
+          <p class="game-status" id="game-status" aria-live="polite">Ждём второго игрока…</p>
+          <div class="game-board" id="game-board" role="grid" aria-label="Поле крестиков-ноликов"></div>
 
-        <div class="game-actions">
-          <button class="secondary-button" id="new-round" type="button">Новый раунд</button>
-        </div>
-        <p class="game-hint" id="game-hint">
-          Код комнаты и QR доступны в лобби Playroom перед запуском.
-        </p>
+          <div class="game-actions">
+            <button class="secondary-button" id="new-round" type="button">Новый раунд</button>
+          </div>
+          <p class="game-hint" id="game-hint">
+            Код комнаты и QR доступны в лобби Playroom перед запуском.
+          </p>
+        </section>
+
+        <section id="worms-game-view" hidden>
+          <p class="game-status worms-status" id="worms-status" aria-live="polite">Выбери одну из трёх карт</p>
+          <div class="worms-stage" id="worms-stage"></div>
+        </section>
       </div>
     </dialog>
 
