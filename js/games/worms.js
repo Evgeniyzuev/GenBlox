@@ -6,6 +6,7 @@ const WEAPONS = [
   { id: "pistol", icon: "⌁", label: "Пистолет", ammo: 8 },
   { id: "rocket", icon: "➤", label: "Базука", ammo: 2 },
   { id: "grenade", icon: "●", label: "Граната", ammo: 2 },
+  { id: "molotov", icon: "♨", label: "Молотов", ammo: 1 },
   { id: "bat", icon: "╱", label: "Бита", ammo: Infinity },
   { id: "dig", icon: "⛏", label: "Копать", ammo: Infinity },
   { id: "block", icon: "■", label: "Блок", ammo: 6 },
@@ -124,6 +125,8 @@ export class WormsGame {
     this.time = 0;
     this.crateClock = 22;
     this.projectiles = [];
+    this.meleeAttacks = [];
+    this.firePatches = [];
     this.particles = [];
     this.blocks = [];
     this.crates = [];
@@ -153,6 +156,7 @@ export class WormsGame {
       x, y: 100, vx: 0, vy: 0, radius: 16, color, name,
       hp: 120, armor: 0, grounded: false, facing: x < 480 ? 1 : -1,
       aim: x < 480 ? -0.35 : Math.PI + 0.35, cooldown: 0, invulnerable: 0,
+      lavaExposure: 0, fireExposure: 0,
       ammo: Object.fromEntries(WEAPONS.map((item) => [item.id, item.ammo])),
       rope: null,
     };
@@ -292,23 +296,24 @@ export class WormsGame {
     if (ammo !== Infinity && ammo <= 0) return;
     const direction = { x: Math.cos(angle), y: Math.sin(angle) };
     if (id === "pistol") {
-      this.hitscan(worm, angle);
-      worm.cooldown = 0.55;
-    } else if (id === "rocket" || id === "grenade") {
+      this.projectiles.push({
+        type: "bullet", owner: worm, x: worm.x + direction.x * 24, y: worm.y + direction.y * 24,
+        vx: direction.x * 330, vy: direction.y * 330, life: 2.2, radius: 4,
+      });
+      this.burst(worm.x + direction.x * 22, worm.y + direction.y * 22, "#fff3ad", 5);
+      worm.cooldown = 0.5;
+    } else if (id === "rocket" || id === "grenade" || id === "molotov") {
       this.projectiles.push({
         type: id, owner: worm, x: worm.x + direction.x * 23, y: worm.y + direction.y * 23,
         vx: direction.x * (id === "rocket" ? 430 : 300),
-        vy: direction.y * (id === "rocket" ? 430 : 300) - (id === "grenade" ? 80 : 0),
-        life: id === "rocket" ? 3 : 2.1, radius: id === "rocket" ? 5 : 7,
+        vy: direction.y * (id === "rocket" ? 430 : 300) - (id === "grenade" || id === "molotov" ? 80 : 0),
+        life: id === "rocket" ? 3 : id === "molotov" ? 1.8 : 2.1,
+        radius: id === "rocket" ? 5 : 7,
       });
-      worm.cooldown = id === "rocket" ? 1.6 : 1.3;
+      worm.cooldown = id === "rocket" ? 1.6 : id === "molotov" ? 1.5 : 1.3;
     } else if (id === "bat") {
-      const target = worm === this.player ? this.enemy : this.player;
-      if (distance(worm, target) < 62) {
-        this.damage(target, 22, direction.x * 330, -175);
-        this.burst(target.x, target.y, worm.color, 12);
-      }
-      worm.cooldown = 0.8;
+      this.meleeAttacks.push({ owner: worm, angle, age: 0, duration: 0.42, struck: false });
+      worm.cooldown = 0.95;
     } else if (id === "dig") {
       this.crater(worm.x + direction.x * 35, worm.y + direction.y * 25, 32);
       worm.cooldown = 0.45;
@@ -413,13 +418,27 @@ export class WormsGame {
     const currentGround = this.groundAt(oldX);
     const candidateGround = this.groundAt(candidateX);
     const rise = currentGround - candidateGround;
-    if (worm.grounded && rise > 11) {
+    const wallBlocksBody = candidateGround < worm.y + worm.radius - 2;
+    if ((worm.grounded && rise > 11) || (!worm.grounded && rise > 5 && wallBlocksBody)) {
       worm.vx = 0;
       worm.x = oldX;
     } else {
       worm.x = candidateX;
     }
+    const oldY = worm.y;
     worm.y += worm.vy * dt;
+    if (worm.vy < 0) {
+      for (const block of this.blocks) {
+        const overlapsX = worm.x + worm.radius > block.x && worm.x - worm.radius < block.x + block.width;
+        const crossedBottom = oldY - worm.radius >= block.y + block.height
+          && worm.y - worm.radius < block.y + block.height;
+        if (overlapsX && crossedBottom) {
+          worm.y = block.y + block.height + worm.radius;
+          worm.vy = 0;
+          break;
+        }
+      }
+    }
     const ground = this.groundAt(worm.x);
     if (worm.y + worm.radius >= ground && worm.vy >= 0) {
       const impact = worm.vy;
@@ -428,6 +447,16 @@ export class WormsGame {
       worm.grounded = true;
       if (impact > 520) this.damage(worm, Math.round((impact - 500) / 13));
     } else worm.grounded = false;
+    if (worm.y + worm.radius >= 515) {
+      worm.lavaExposure = (worm.lavaExposure ?? 0) + dt;
+      while (worm.lavaExposure >= 1) {
+        worm.lavaExposure -= 1;
+        worm.hp = Math.max(0, worm.hp - 1);
+        if (worm.hp <= 0) this.finish(worm === this.enemy);
+      }
+    } else {
+      worm.lavaExposure = 0;
+    }
     if (worm.y > 560) {
       worm.hp = 0;
       this.finish(worm === this.enemy);
@@ -437,7 +466,12 @@ export class WormsGame {
   updateProjectiles(dt) {
     this.projectiles = this.projectiles.filter((projectile) => {
       projectile.life -= dt;
-      projectile.vy += (projectile.type === "grenade" ? 610 : 70) * dt;
+      const gravity = projectile.type === "grenade" || projectile.type === "molotov"
+        ? 610
+        : projectile.type === "bullet"
+          ? 0
+          : 70;
+      projectile.vy += gravity * dt;
       projectile.x += projectile.vx * dt;
       projectile.y += projectile.vy * dt;
       if (projectile.type === "grenade" && projectile.y >= this.groundAt(projectile.x) - projectile.radius) {
@@ -445,15 +479,90 @@ export class WormsGame {
         projectile.vy *= -0.48;
         projectile.vx *= 0.72;
       }
-      const hitWorm = [this.player, this.enemy].some((worm) => worm !== projectile.owner && distance(worm, projectile) < worm.radius + projectile.radius);
-      const hitGround = projectile.type === "rocket" && projectile.y >= this.groundAt(projectile.x);
+      const target = [this.player, this.enemy].find(
+        (worm) => worm !== projectile.owner && distance(worm, projectile) < worm.radius + projectile.radius,
+      );
+      const touchesGround = projectile.y >= this.groundAt(projectile.x) - projectile.radius;
+      if (projectile.type === "bullet" && (target || touchesGround)) {
+        if (target) this.damage(target, 10, Math.sign(projectile.vx) * 75, -25);
+        this.burst(projectile.x, projectile.y, target ? "#fff3ad" : "#d7a96a", 7);
+        return false;
+      }
+      if (projectile.type === "bullet"
+        && (projectile.life <= 0 || projectile.x < 0 || projectile.x > 960 || projectile.y < 0 || projectile.y > 540)) {
+        return false;
+      }
+      if (projectile.type === "molotov" && (target || touchesGround || projectile.life <= 0)) {
+        this.ignite(projectile.x, Math.min(projectile.y, this.groundAt(projectile.x) - 4));
+        return false;
+      }
+      const hitGround = projectile.type === "rocket" && touchesGround;
       const expired = projectile.life <= 0 || projectile.x < 0 || projectile.x > 960 || projectile.y > 540;
-      if (hitWorm || hitGround || expired) {
+      if (target || hitGround || expired) {
         this.explode(projectile.x, projectile.y, projectile.type === "rocket" ? 58 : 52, projectile.type === "rocket" ? 38 : 34);
         return false;
       }
       return true;
     });
+  }
+
+  updateMeleeAttacks(dt) {
+    this.meleeAttacks = this.meleeAttacks.filter((attack) => {
+      attack.age += dt;
+      if (!attack.struck && attack.age >= 0.26) {
+        attack.struck = true;
+        const target = attack.owner === this.player ? this.enemy : this.player;
+        const dx = target.x - attack.owner.x;
+        const dy = target.y - attack.owner.y;
+        const d = Math.hypot(dx, dy);
+        const facing = Math.cos(Math.atan2(dy, dx) - attack.angle);
+        if (d < 64 && facing > 0.35) {
+          this.damage(target, 22, Math.cos(attack.angle) * 330, -175);
+          this.burst(target.x, target.y, attack.owner.color, 12);
+        }
+      }
+      return attack.age < attack.duration;
+    });
+  }
+
+  ignite(x, y) {
+    let cursor = clamp(x, 15, 945);
+    const direction = this.groundAt(cursor - 18) > this.groundAt(cursor + 18) ? -1 : 1;
+    for (let index = 0; index < 9; index += 1) {
+      cursor = clamp(cursor + direction * 18, 10, 950);
+      this.firePatches.push({
+        x: cursor,
+        y: this.groundAt(cursor) - 3,
+        life: 5.5 - index * 0.18,
+        burnClock: 0.3 + index * 0.11,
+      });
+    }
+    this.burst(x, y, "#ff9d3d", 22);
+  }
+
+  updateFire(dt) {
+    this.firePatches = this.firePatches.filter((patch) => {
+      patch.life -= dt;
+      patch.burnClock -= dt;
+      patch.y = this.groundAt(patch.x) - 3;
+      if (patch.burnClock <= 0) {
+        patch.burnClock = 1.15;
+        this.crater(patch.x, patch.y + 3, 2.5);
+      }
+      return patch.life > 0;
+    });
+    for (const worm of [this.player, this.enemy]) {
+      const burning = this.firePatches.some((patch) => distance(worm, patch) < worm.radius + 18);
+      if (!burning) {
+        worm.fireExposure = 0;
+        continue;
+      }
+      worm.fireExposure = (worm.fireExposure ?? 0) + dt;
+      while (worm.fireExposure >= 0.5) {
+        worm.fireExposure -= 0.5;
+        this.damage(worm, 2);
+      }
+    }
   }
 
   updateAI(dt) {
@@ -497,6 +606,7 @@ export class WormsGame {
             worm.ammo.pistol += 3;
             worm.ammo.rocket += 1;
             worm.ammo.grenade += 1;
+            worm.ammo.molotov += 1;
           }
           this.burst(crate.x, crate.y, "#b7f34a", 18);
           if (worm === this.player) this.updateToolbar();
@@ -577,6 +687,11 @@ export class WormsGame {
         ...projectile,
         ownerSide: owner === this.player ? "player" : "enemy",
       })),
+      meleeAttacks: this.meleeAttacks.map(({ owner, ...attack }) => ({
+        ...attack,
+        ownerSide: owner === this.player ? "player" : "enemy",
+      })),
+      firePatches: this.firePatches.map((patch) => ({ ...patch })),
       crates: this.crates.map((crate) => ({ ...crate })),
       blocks: this.blocks.map((block) => ({ ...block })),
       terrainEvents: this.terrainEvents.map((event) => ({ ...event })),
@@ -609,6 +724,11 @@ export class WormsGame {
       ...projectile,
       owner: projectile.ownerSide === "player" ? this.player : this.enemy,
     }));
+    this.meleeAttacks = (snapshot.meleeAttacks ?? []).map((attack) => ({
+      ...attack,
+      owner: attack.ownerSide === "player" ? this.player : this.enemy,
+    }));
+    this.firePatches = (snapshot.firePatches ?? []).map((patch) => ({ ...patch }));
     this.crates = (snapshot.crates ?? []).map((crate) => ({ ...crate }));
     this.blocks = (snapshot.blocks ?? []).map((block) => ({ ...block }));
     const events = snapshot.terrainEvents ?? [];
@@ -655,6 +775,8 @@ export class WormsGame {
     }
 
     this.updateProjectiles(dt);
+    this.updateMeleeAttacks(dt);
+    this.updateFire(dt);
     this.updateCrates(dt);
     this.networkClock += dt;
     if (this.networkClock >= 1 / 12) {
@@ -677,6 +799,17 @@ export class WormsGame {
         worm.aim += angleDelta * factor;
       }
     }
+    for (const projectile of this.projectiles) {
+      const gravity = projectile.type === "grenade" || projectile.type === "molotov"
+        ? 610
+        : projectile.type === "bullet"
+          ? 0
+          : 70;
+      projectile.vy += gravity * dt;
+      projectile.x += projectile.vx * dt;
+      projectile.y += projectile.vy * dt;
+    }
+    for (const attack of this.meleeAttacks) attack.age = Math.min(attack.duration, attack.age + dt);
   }
 
   update(dt) {
@@ -709,6 +842,8 @@ export class WormsGame {
       if (input) this.player.facing = Math.sign(input);
       this.updateAI(dt);
       this.updateProjectiles(dt);
+      this.updateMeleeAttacks(dt);
+      this.updateFire(dt);
       this.updateCrates(dt);
     }
     this.particles = this.particles.filter((particle) => {
@@ -930,9 +1065,13 @@ export class WormsGame {
     }
     if (this.state === "maps") return;
     this.drawTerrain();
-    context.fillStyle = "rgba(25,100,119,.72)";
+    const lava = context.createLinearGradient(0, 512, 0, 540);
+    lava.addColorStop(0, "rgba(255,210,72,.95)");
+    lava.addColorStop(0.32, "rgba(255,102,34,.94)");
+    lava.addColorStop(1, "rgba(112,20,32,.98)");
+    context.fillStyle = lava;
     context.fillRect(0, 515, 960, 25);
-    context.strokeStyle = "rgba(137,224,220,.65)";
+    context.strokeStyle = "rgba(255,242,145,.9)";
     context.lineWidth = 3;
     context.beginPath();
     for (let x = 0; x <= 960; x += 12) {
@@ -957,13 +1096,53 @@ export class WormsGame {
       context.fillText(crate.type === "health" ? "+" : crate.type === "armor" ? "◆" : "?", crate.x, crate.y + 6);
     }
     for (const projectile of this.projectiles) {
-      context.fillStyle = projectile.type === "rocket" ? "#ff668c" : "#171525";
+      context.fillStyle = projectile.type === "rocket"
+        ? "#ff668c"
+        : projectile.type === "bullet"
+          ? "#fff4a9"
+          : projectile.type === "molotov"
+            ? "#ff8b3d"
+            : "#171525";
+      if (projectile.type === "bullet") {
+        context.strokeStyle = "rgba(255,244,169,.45)";
+        context.lineWidth = 3;
+        context.beginPath();
+        context.moveTo(projectile.x, projectile.y);
+        context.lineTo(projectile.x - projectile.vx * 0.045, projectile.y - projectile.vy * 0.045);
+        context.stroke();
+      }
       context.beginPath();
       context.arc(projectile.x, projectile.y, projectile.radius, 0, TAU);
       context.fill();
     }
+    for (const patch of this.firePatches) {
+      const flicker = Math.sin(this.time * 15 + patch.x) * 4;
+      const flame = context.createLinearGradient(patch.x, patch.y - 30, patch.x, patch.y + 3);
+      flame.addColorStop(0, "rgba(255,241,126,.15)");
+      flame.addColorStop(0.45, "#ffcc48");
+      flame.addColorStop(1, "#ef4a2b");
+      context.fillStyle = flame;
+      context.beginPath();
+      context.moveTo(patch.x - 10, patch.y + 3);
+      context.quadraticCurveTo(patch.x - 8, patch.y - 14, patch.x + flicker, patch.y - 27);
+      context.quadraticCurveTo(patch.x + 13, patch.y - 10, patch.x + 10, patch.y + 3);
+      context.closePath();
+      context.fill();
+    }
     this.drawWorm(this.player);
     this.drawWorm(this.enemy);
+    for (const attack of this.meleeAttacks) {
+      const progress = clamp(attack.age / attack.duration, 0, 1);
+      const swing = attack.angle - 1.15 + progress * 2.3;
+      context.strokeStyle = attack.struck ? "rgba(255,255,255,.8)" : "rgba(255,211,106,.72)";
+      context.lineWidth = 8;
+      context.lineCap = "round";
+      context.beginPath();
+      context.moveTo(attack.owner.x, attack.owner.y);
+      context.lineTo(attack.owner.x + Math.cos(swing) * 46, attack.owner.y + Math.sin(swing) * 46);
+      context.stroke();
+      context.lineCap = "butt";
+    }
     for (const particle of this.particles) {
       context.globalAlpha = clamp(particle.life / particle.maxLife, 0, 1);
       context.strokeStyle = particle.color;

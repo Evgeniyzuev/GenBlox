@@ -390,7 +390,7 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   top: max(68px, calc(env(safe-area-inset-top) + 58px));
   left: 50%;
   display: grid;
-  grid-template-columns: repeat(7, minmax(40px, 1fr));
+  grid-template-columns: repeat(8, minmax(38px, 1fr));
   gap: 6px;
   width: min(650px, calc(100% - 280px));
   padding: 6px;
