@@ -7,10 +7,11 @@ const WEAPONS = [
   { id: "rocket", icon: "➤", label: "Базука", ammo: 2 },
   { id: "grenade", icon: "●", label: "Граната", ammo: 2 },
   { id: "molotov", icon: "♨", label: "Молотов", ammo: 1 },
-  { id: "bat", icon: "╱", label: "Бита", ammo: Infinity },
-  { id: "dig", icon: "⛏", label: "Копать", ammo: Infinity },
+  { id: "bat", icon: "╱", label: "Бита", ammo: 3 },
+  { id: "finger", icon: "☝", label: "Палец", ammo: Infinity },
+  { id: "dig", icon: "⛏", label: "Кирка", ammo: 8 },
   { id: "block", icon: "■", label: "Блок", ammo: 6 },
-  { id: "rope", icon: "⌇", label: "Верёвка", ammo: Infinity },
+  { id: "rope", icon: "⌇", label: "Верёвка", ammo: 5 },
 ];
 
 const MAPS = [
@@ -51,7 +52,7 @@ export class WormsGame {
     this.lastTime = performance.now();
     this.networkClock = 0;
     this.inputClock = 0;
-    this.localInput = { move: 0, aim: -0.35, weapon: "pistol", jumpSeq: 0, fireSeq: 0 };
+    this.localInput = { move: 0, ropeDelta: 0, aim: -0.35, weapon: "pistol", jumpSeq: 0, fireSeq: 0 };
     this.jumpHeld = false;
     this.lastRemoteJumpSeq = 0;
     this.lastRemoteFireSeq = 0;
@@ -156,14 +157,15 @@ export class WormsGame {
       x, y: 100, vx: 0, vy: 0, radius: 16, color, name,
       hp: 120, armor: 0, grounded: false, facing: x < 480 ? 1 : -1,
       aim: x < 480 ? -0.35 : Math.PI + 0.35, cooldown: 0, invulnerable: 0,
-      lavaExposure: 0, fireExposure: 0,
+      lavaExposure: 0, fireExposure: 0, hurtTime: 0, hurtTilt: 0,
       ammo: Object.fromEntries(WEAPONS.map((item) => [item.id, item.ammo])),
       rope: null,
     };
   }
 
   createTerrain(mapId) {
-    const terrain = new Float32Array(960);
+    const terrain = new Uint8Array(960 * 540);
+    const surface = new Int16Array(960);
     for (let x = 0; x < 960; x += 1) {
       let y;
       if (mapId === "canyon") {
@@ -176,16 +178,74 @@ export class WormsGame {
         y = 385 + Math.sin(x / 48) * 48;
         if ((x > 245 && x < 340) || (x > 620 && x < 735)) y = 535;
       }
-      terrain[x] = clamp(y, 250, 535);
+      surface[x] = clamp(Math.round(y), 250, 535);
+      for (let row = surface[x]; row < 540; row += 1) terrain[row * 960 + x] = 1;
     }
+
+    const carveCircle = (cx, cy, radius) => {
+      const minX = clamp(Math.floor(cx - radius), 0, 959);
+      const maxX = clamp(Math.ceil(cx + radius), 0, 959);
+      const minY = clamp(Math.floor(cy - radius), 0, 539);
+      const maxY = clamp(Math.ceil(cy + radius), 0, 539);
+      for (let row = minY; row <= maxY; row += 1) {
+        for (let column = minX; column <= maxX; column += 1) {
+          if ((column - cx) ** 2 + (row - cy) ** 2 <= radius ** 2) {
+            terrain[row * 960 + column] = 0;
+          }
+        }
+      }
+    };
+
+    if (mapId === "anthill") {
+      for (let x = 90; x <= 870; x += 18) carveCircle(x, 410 + Math.sin(x / 75) * 18, 24);
+      for (let x = 170; x <= 790; x += 18) carveCircle(x, 474 + Math.sin(x / 58) * 12, 21);
+      for (let y = 350; y <= 480; y += 17) {
+        carveCircle(285 + Math.sin(y / 22) * 8, y, 20);
+        carveCircle(675 + Math.cos(y / 25) * 8, y, 20);
+      }
+    }
+    this.terrainSurface = surface;
+    this.terrainDirty = true;
     return terrain;
   }
 
-  groundAt(x) {
-    const index = clamp(Math.round(x), 0, 959);
-    let ground = this.terrain[index];
+  isTerrainSolid(x, y) {
+    const column = Math.round(x);
+    const row = Math.round(y);
+    if (column < 0 || column >= 960 || row >= 540) return true;
+    if (row < 0) return false;
+    return this.terrain[row * 960 + column] === 1;
+  }
+
+  isBlockSolid(x, y) {
+    return this.blocks.some(
+      (block) => x >= block.x && x <= block.x + block.width && y >= block.y && y <= block.y + block.height,
+    );
+  }
+
+  circleHitsSolid(x, y, radius) {
+    const testRadius = Math.max(2, radius - 2);
+    if (this.isTerrainSolid(x, y) || this.isBlockSolid(x, y)) return true;
+    for (let index = 0; index < 16; index += 1) {
+      const angle = index / 16 * TAU;
+      const px = x + Math.cos(angle) * testRadius;
+      const py = y + Math.sin(angle) * testRadius;
+      if (this.isTerrainSolid(px, py) || this.isBlockSolid(px, py)) return true;
+    }
+    return false;
+  }
+
+  groundAt(x, startY = 0) {
+    const column = clamp(Math.round(x), 0, 959);
+    let ground = 540;
+    for (let row = clamp(Math.floor(startY), 0, 539); row < 540; row += 1) {
+      if (this.terrain[row * 960 + column]) {
+        ground = row;
+        break;
+      }
+    }
     for (const block of this.blocks) {
-      if (x >= block.x && x <= block.x + block.width) ground = Math.min(ground, block.y);
+      if (x >= block.x && x <= block.x + block.width && block.y >= startY) ground = Math.min(ground, block.y);
     }
     return ground;
   }
@@ -231,8 +291,8 @@ export class WormsGame {
     this.canvas.setPointerCapture(event.pointerId);
     const point = this.pointerPosition(event);
     let side;
-    if (Math.hypot(point.x - 235, point.y - 405) < 70) side = "jump";
-    else if (Math.hypot(point.x - 890, point.y - 340) < 72) side = "fire";
+    if (Math.hypot(point.x - 890, point.y - 430) < 62) side = "jump";
+    else if (Math.hypot(point.x - 890, point.y - 330) < 62) side = "fire";
     else side = point.x < 480 ? "move" : "aim";
     this.pointers.set(event.pointerId, { ...point, startX: point.x, startY: point.y, side });
     if (side === "jump") this.jump();
@@ -311,19 +371,28 @@ export class WormsGame {
         radius: id === "rocket" ? 5 : 7,
       });
       worm.cooldown = id === "rocket" ? 1.6 : id === "molotov" ? 1.5 : 1.3;
-    } else if (id === "bat") {
-      this.meleeAttacks.push({ owner: worm, angle, age: 0, duration: 0.42, struck: false });
-      worm.cooldown = 0.95;
+    } else if (id === "bat" || id === "finger") {
+      this.meleeAttacks.push({
+        owner: worm, angle, age: 0,
+        duration: id === "bat" ? 0.42 : 0.28,
+        strikeAt: id === "bat" ? 0.26 : 0.14,
+        weapon: id,
+        struck: false,
+      });
+      worm.cooldown = id === "bat" ? 0.95 : 0.48;
     } else if (id === "dig") {
-      this.crater(worm.x + direction.x * 35, worm.y + direction.y * 25, 32);
+      this.crater(worm.x + direction.x * 30, worm.y + direction.y * 24, 18);
       worm.cooldown = 0.45;
     } else if (id === "block") {
       const x = clamp(worm.x + direction.x * 52 - 22, 10, 906);
-      const y = Math.min(this.groundAt(x + 22) - 34, worm.y + direction.y * 58);
+      const y = Math.min(this.groundAt(x + 22, Math.max(0, worm.y - 20)) - 34, worm.y + direction.y * 58);
       this.blocks.push({ x, y, width: 44, height: 34, hp: 45, color: worm.color });
       worm.cooldown = 0.5;
     } else if (id === "rope") {
-      if (worm.rope) worm.rope = null;
+      if (worm.rope) {
+        worm.rope = null;
+        return;
+      }
       else {
         const length = 190;
         const anchor = { x: clamp(worm.x + direction.x * length, 15, 945), y: clamp(worm.y + direction.y * length, 30, 490) };
@@ -357,6 +426,8 @@ export class WormsGame {
     worm.vx += vx;
     worm.vy += vy;
     worm.invulnerable = 0.2;
+    worm.hurtTime = 0.58;
+    worm.hurtTilt = (Math.random() - 0.5) * 0.9;
     if (worm.hp <= 0) this.finish(worm === this.enemy);
   }
 
@@ -375,13 +446,18 @@ export class WormsGame {
   }
 
   crater(x, y, radius) {
-    const start = clamp(Math.floor(x - radius), 0, 959);
-    const end = clamp(Math.ceil(x + radius), 0, 959);
-    for (let column = start; column <= end; column += 1) {
-      const dx = column - x;
-      const depth = Math.sqrt(Math.max(0, radius * radius - dx * dx));
-      if (this.terrain[column] < y + depth) this.terrain[column] = clamp(y + depth, this.terrain[column], 540);
+    const minX = clamp(Math.floor(x - radius), 0, 959);
+    const maxX = clamp(Math.ceil(x + radius), 0, 959);
+    const minY = clamp(Math.floor(y - radius), 0, 539);
+    const maxY = clamp(Math.ceil(y + radius), 0, 539);
+    for (let row = minY; row <= maxY; row += 1) {
+      for (let column = minX; column <= maxX; column += 1) {
+        if ((column - x) ** 2 + (row - y) ** 2 <= radius ** 2) {
+          this.terrain[row * 960 + column] = 0;
+        }
+      }
     }
+    this.terrainDirty = true;
     if (this.networkRole === "host") this.terrainEvents.push({ x, y, radius });
   }
 
@@ -399,6 +475,7 @@ export class WormsGame {
   updateWorm(worm, dt, input = 0) {
     worm.cooldown = Math.max(0, worm.cooldown - dt);
     worm.invulnerable = Math.max(0, worm.invulnerable - dt);
+    worm.hurtTime = Math.max(0, (worm.hurtTime ?? 0) - dt);
     worm.vx += input * 580 * dt;
     worm.vx *= Math.pow(worm.grounded ? 0.001 : 0.12, dt);
     worm.vx = clamp(worm.vx, -145, 145);
@@ -415,43 +492,56 @@ export class WormsGame {
     }
     const oldX = worm.x;
     const candidateX = clamp(worm.x + worm.vx * dt, worm.radius, 960 - worm.radius);
-    const currentGround = this.groundAt(oldX);
-    const candidateGround = this.groundAt(candidateX);
-    const rise = currentGround - candidateGround;
-    const wallBlocksBody = candidateGround < worm.y + worm.radius - 2;
-    if ((worm.grounded && rise > 11) || (!worm.grounded && rise > 5 && wallBlocksBody)) {
-      worm.vx = 0;
-      worm.x = oldX;
+    if (this.circleHitsSolid(candidateX, worm.y, worm.radius)) {
+      let stepped = false;
+      if (worm.grounded) {
+        for (let step = 1; step <= 10; step += 1) {
+          if (!this.circleHitsSolid(candidateX, worm.y - step, worm.radius)) {
+            worm.x = candidateX;
+            worm.y -= step;
+            stepped = true;
+            break;
+          }
+        }
+      }
+      if (!stepped) {
+        worm.vx = 0;
+        worm.x = oldX;
+      }
     } else {
       worm.x = candidateX;
     }
     const oldY = worm.y;
-    worm.y += worm.vy * dt;
-    if (worm.vy < 0) {
-      for (const block of this.blocks) {
-        const overlapsX = worm.x + worm.radius > block.x && worm.x - worm.radius < block.x + block.width;
-        const crossedBottom = oldY - worm.radius >= block.y + block.height
-          && worm.y - worm.radius < block.y + block.height;
-        if (overlapsX && crossedBottom) {
-          worm.y = block.y + block.height + worm.radius;
-          worm.vy = 0;
+    const candidateY = worm.y + worm.vy * dt;
+    const direction = Math.sign(candidateY - oldY);
+    let safeY = oldY;
+    let verticalCollision = false;
+    if (direction) {
+      for (let nextY = oldY + direction; direction > 0 ? nextY <= candidateY : nextY >= candidateY; nextY += direction) {
+        if (this.circleHitsSolid(worm.x, nextY, worm.radius)) {
+          verticalCollision = true;
           break;
         }
+        safeY = nextY;
       }
     }
-    const ground = this.groundAt(worm.x);
-    if (worm.y + worm.radius >= ground && worm.vy >= 0) {
+    if (verticalCollision) {
       const impact = worm.vy;
-      worm.y = ground - worm.radius;
+      worm.y = safeY;
       worm.vy = 0;
-      worm.grounded = true;
-      if (impact > 520) this.damage(worm, Math.round((impact - 500) / 13));
-    } else worm.grounded = false;
+      worm.grounded = direction > 0;
+      if (direction > 0 && impact > 520) this.damage(worm, Math.round((impact - 500) / 13));
+    } else {
+      worm.y = candidateY;
+      worm.grounded = this.circleHitsSolid(worm.x, worm.y + 3, worm.radius);
+    }
     if (worm.y + worm.radius >= 515) {
       worm.lavaExposure = (worm.lavaExposure ?? 0) + dt;
       while (worm.lavaExposure >= 1) {
         worm.lavaExposure -= 1;
         worm.hp = Math.max(0, worm.hp - 1);
+        worm.hurtTime = 0.45;
+        worm.hurtTilt = (Math.random() - 0.5) * 0.7;
         if (worm.hp <= 0) this.finish(worm === this.enemy);
       }
     } else {
@@ -474,15 +564,19 @@ export class WormsGame {
       projectile.vy += gravity * dt;
       projectile.x += projectile.vx * dt;
       projectile.y += projectile.vy * dt;
-      if (projectile.type === "grenade" && projectile.y >= this.groundAt(projectile.x) - projectile.radius) {
-        projectile.y = this.groundAt(projectile.x) - projectile.radius;
+      const touchesSolid = this.isTerrainSolid(projectile.x, projectile.y + projectile.radius)
+        || this.isBlockSolid(projectile.x, projectile.y + projectile.radius);
+      if (projectile.type === "grenade" && touchesSolid) {
+        while (this.isTerrainSolid(projectile.x, projectile.y + projectile.radius)
+          || this.isBlockSolid(projectile.x, projectile.y + projectile.radius)) projectile.y -= 1;
         projectile.vy *= -0.48;
         projectile.vx *= 0.72;
       }
       const target = [this.player, this.enemy].find(
         (worm) => worm !== projectile.owner && distance(worm, projectile) < worm.radius + projectile.radius,
       );
-      const touchesGround = projectile.y >= this.groundAt(projectile.x) - projectile.radius;
+      const touchesGround = this.isTerrainSolid(projectile.x, projectile.y)
+        || this.isBlockSolid(projectile.x, projectile.y);
       if (projectile.type === "bullet" && (target || touchesGround)) {
         if (target) this.damage(target, 10, Math.sign(projectile.vx) * 75, -25);
         this.burst(projectile.x, projectile.y, target ? "#fff3ad" : "#d7a96a", 7);
@@ -493,7 +587,8 @@ export class WormsGame {
         return false;
       }
       if (projectile.type === "molotov" && (target || touchesGround || projectile.life <= 0)) {
-        this.ignite(projectile.x, Math.min(projectile.y, this.groundAt(projectile.x) - 4));
+        const surface = this.groundAt(projectile.x, Math.max(0, projectile.y - 14));
+        this.ignite(projectile.x, Math.min(projectile.y, surface - 4));
         return false;
       }
       const hitGround = projectile.type === "rocket" && touchesGround;
@@ -509,15 +604,19 @@ export class WormsGame {
   updateMeleeAttacks(dt) {
     this.meleeAttacks = this.meleeAttacks.filter((attack) => {
       attack.age += dt;
-      if (!attack.struck && attack.age >= 0.26) {
+      if (!attack.struck && attack.age >= attack.strikeAt) {
         attack.struck = true;
         const target = attack.owner === this.player ? this.enemy : this.player;
         const dx = target.x - attack.owner.x;
         const dy = target.y - attack.owner.y;
         const d = Math.hypot(dx, dy);
         const facing = Math.cos(Math.atan2(dy, dx) - attack.angle);
-        if (d < 64 && facing > 0.35) {
-          this.damage(target, 22, Math.cos(attack.angle) * 330, -175);
+        const range = attack.weapon === "bat" ? 68 : 48;
+        if (d < range && facing > 0.35) {
+          const damage = attack.weapon === "bat" ? 22 : 7;
+          const pushX = attack.weapon === "bat" ? 510 : 150;
+          const pushY = attack.weapon === "bat" ? -300 : -75;
+          this.damage(target, damage, Math.cos(attack.angle) * pushX, pushY);
           this.burst(target.x, target.y, attack.owner.color, 12);
         }
       }
@@ -527,12 +626,13 @@ export class WormsGame {
 
   ignite(x, y) {
     let cursor = clamp(x, 15, 945);
-    const direction = this.groundAt(cursor - 18) > this.groundAt(cursor + 18) ? -1 : 1;
+    const scanY = Math.max(0, y - 22);
+    const direction = this.groundAt(cursor - 18, scanY) > this.groundAt(cursor + 18, scanY) ? -1 : 1;
     for (let index = 0; index < 9; index += 1) {
       cursor = clamp(cursor + direction * 18, 10, 950);
       this.firePatches.push({
         x: cursor,
-        y: this.groundAt(cursor) - 3,
+        y: this.groundAt(cursor, scanY) - 3,
         life: 5.5 - index * 0.18,
         burnClock: 0.3 + index * 0.11,
       });
@@ -544,7 +644,7 @@ export class WormsGame {
     this.firePatches = this.firePatches.filter((patch) => {
       patch.life -= dt;
       patch.burnClock -= dt;
-      patch.y = this.groundAt(patch.x) - 3;
+      patch.y = this.groundAt(patch.x, Math.max(0, patch.y - 18)) - 3;
       if (patch.burnClock <= 0) {
         patch.burnClock = 1.15;
         this.crater(patch.x, patch.y + 3, 2.5);
@@ -576,7 +676,9 @@ export class WormsGame {
     if (this.enemy.grounded && Math.random() < dt * 0.24) this.enemy.vy = -265;
     if (this.enemy.cooldown <= 0 && Math.random() < dt * 0.7 && Math.abs(dx) < 600) {
       const spread = (Math.random() - 0.5) * 0.16;
-      const weapon = Math.abs(dx) < 55 ? "bat" : this.enemy.ammo.rocket > 0 && Math.random() < 0.28 ? "rocket" : "pistol";
+      const weapon = Math.abs(dx) < 55
+        ? this.enemy.ammo.bat > 0 ? "bat" : "finger"
+        : this.enemy.ammo.rocket > 0 && Math.random() < 0.28 ? "rocket" : "pistol";
       this.useWeapon(this.enemy, weapon, this.enemy.aim + spread);
     }
   }
@@ -593,7 +695,7 @@ export class WormsGame {
     this.crates = this.crates.filter((crate) => {
       crate.vy += 400 * dt;
       crate.y += crate.vy * dt;
-      const ground = this.groundAt(crate.x);
+      const ground = this.groundAt(crate.x, Math.max(0, crate.y));
       if (crate.y > ground - 13) {
         crate.y = ground - 13;
         crate.vy = 0;
@@ -653,6 +755,8 @@ export class WormsGame {
       x: worm.x, y: worm.y, vx: worm.vx, vy: worm.vy,
       hp: worm.hp, armor: worm.armor, grounded: worm.grounded,
       facing: worm.facing, aim: worm.aim, cooldown: worm.cooldown,
+      lavaExposure: worm.lavaExposure, fireExposure: worm.fireExposure,
+      hurtTime: worm.hurtTime, hurtTilt: worm.hurtTilt,
       ammo: Object.fromEntries(
         Object.entries(worm.ammo).map(([key, value]) => [key, value === Infinity ? -1 : value]),
       ),
@@ -751,14 +855,22 @@ export class WormsGame {
     this.updateToolbar();
   }
 
-  updateNetworkHost(dt, localMove) {
+  adjustRope(worm, delta, dt) {
+    if (!worm.rope || !delta) return;
+    worm.rope.length = clamp(worm.rope.length + delta * 120 * dt, 42, 300);
+  }
+
+  updateNetworkHost(dt, localMove, localRopeDelta) {
+    this.adjustRope(this.player, localRopeDelta, dt);
     this.updateWorm(this.player, dt, localMove);
     if (localMove) this.player.facing = Math.sign(localMove);
 
     const remoteInput = this.network.getRemoteInput?.();
     const move = clamp(Number(remoteInput?.move) || 0, -1, 1);
+    const ropeDelta = clamp(Number(remoteInput?.ropeDelta) || 0, -1, 1);
     this.enemy.aim = Number.isFinite(remoteInput?.aim) ? remoteInput.aim : this.enemy.aim;
     this.enemy.facing = Math.cos(this.enemy.aim) >= 0 ? 1 : -1;
+    this.adjustRope(this.enemy, ropeDelta, dt);
     this.updateWorm(this.enemy, dt, move);
 
     if (remoteInput?.jumpSeq > this.lastRemoteJumpSeq) {
@@ -817,18 +929,28 @@ export class WormsGame {
     this.time += dt;
     this.messageTime -= dt;
     let input = 0;
+    let ropeDelta = 0;
     if (this.keys.has("a") || this.keys.has("arrowleft")) input -= 1;
     if (this.keys.has("d") || this.keys.has("arrowright")) input += 1;
     for (const pointer of this.pointers.values()) {
-      if (pointer.side === "move") input += clamp((pointer.x - pointer.startX) / 55, -1, 1);
+      if (pointer.side === "move") {
+        input += clamp((pointer.x - pointer.startX) / 55, -1, 1);
+        ropeDelta += clamp((pointer.y - pointer.startY) / 55, -1, 1);
+      }
     }
     input = clamp(input, -1, 1);
-    const wantsJump = this.keys.has("w") || this.keys.has("arrowup");
+    ropeDelta = clamp(ropeDelta, -1, 1);
+    if (this.localWorm.rope) {
+      if (this.keys.has("w") || this.keys.has("arrowup")) ropeDelta -= 1;
+      if (this.keys.has("s") || this.keys.has("arrowdown")) ropeDelta += 1;
+    }
+    const wantsJump = !this.localWorm.rope && (this.keys.has("w") || this.keys.has("arrowup"));
     if (wantsJump && !this.jumpHeld && this.localWorm.grounded) this.jump();
     this.jumpHeld = wantsJump;
 
     if (this.networkRole === "guest") {
       this.localInput.move = input;
+      this.localInput.ropeDelta = ropeDelta;
       this.localInput.aim = this.localWorm.aim;
       this.inputClock += dt;
       this.sendNetworkInput();
@@ -836,8 +958,9 @@ export class WormsGame {
       return;
     }
 
-    if (this.networkRole === "host") this.updateNetworkHost(dt, input);
+    if (this.networkRole === "host") this.updateNetworkHost(dt, input, ropeDelta);
     else {
+      this.adjustRope(this.player, ropeDelta, dt);
       this.updateWorm(this.player, dt, input);
       if (input) this.player.facing = Math.sign(input);
       this.updateAI(dt);
@@ -859,32 +982,37 @@ export class WormsGame {
 
   drawTerrain() {
     const context = this.context;
-    const gradient = context.createLinearGradient(0, 260, 0, 540);
-    gradient.addColorStop(0, this.mapId === "islands" ? "#4f9b78" : "#946044");
-    gradient.addColorStop(1, "#3d2730");
-    context.beginPath();
-    context.moveTo(0, 540);
-    context.lineTo(0, this.terrain[0]);
-    for (let x = 1; x < 960; x += 3) context.lineTo(x, this.terrain[x]);
-    context.lineTo(960, 540);
-    context.closePath();
-    context.fillStyle = gradient;
-    context.fill();
-    context.strokeStyle = "#e1b577";
-    context.lineWidth = 7;
-    context.stroke();
-    context.strokeStyle = "rgba(39,31,45,.35)";
-    context.lineWidth = 2;
-    for (let x = 20; x < 960; x += 58) {
-      const y = this.terrain[x] + 34 + (x % 4) * 9;
-      context.beginPath();
-      context.moveTo(x - 24, y + 16);
-      context.lineTo(x, y - 15);
-      context.lineTo(x + 27, y + 8);
-      context.lineTo(x + 12, y + 37);
-      context.closePath();
-      context.stroke();
+    if (!this.terrainCanvas) {
+      this.terrainCanvas = document.createElement("canvas");
+      this.terrainCanvas.width = 960;
+      this.terrainCanvas.height = 540;
     }
+    if (this.terrainDirty) {
+      const terrainContext = this.terrainCanvas.getContext("2d");
+      const image = terrainContext.createImageData(960, 540);
+      for (let y = 0; y < 540; y += 1) {
+        for (let x = 0; x < 960; x += 1) {
+          if (!this.terrain[y * 960 + x]) continue;
+          const offset = (y * 960 + x) * 4;
+          const edge = y < 4 || !this.terrain[(y - 3) * 960 + x];
+          const grain = ((x * 17 + y * 29) % 19) - 9;
+          if (edge) {
+            image.data[offset] = 214 + grain;
+            image.data[offset + 1] = 166 + grain;
+            image.data[offset + 2] = 94 + grain / 2;
+          } else {
+            const depth = clamp((y - 270) / 270, 0, 1);
+            image.data[offset] = 126 - depth * 52 + grain;
+            image.data[offset + 1] = 88 - depth * 42 + grain;
+            image.data[offset + 2] = 70 - depth * 26 + grain;
+          }
+          image.data[offset + 3] = 255;
+        }
+      }
+      terrainContext.putImageData(image, 0, 0);
+      this.terrainDirty = false;
+    }
+    context.drawImage(this.terrainCanvas, 0, 0);
   }
 
   drawWorm(worm) {
@@ -892,6 +1020,11 @@ export class WormsGame {
     if (worm.invulnerable > 0 && Math.floor(worm.invulnerable * 30) % 2) return;
     context.save();
     context.translate(worm.x, worm.y);
+    if (worm.hurtTime > 0) {
+      const wobble = Math.sin(worm.hurtTime * 38);
+      context.rotate(worm.hurtTilt * wobble);
+      context.scale(1 + Math.abs(wobble) * 0.18, 1 - Math.abs(wobble) * 0.14);
+    }
     context.fillStyle = "rgba(8,10,24,.28)";
     context.beginPath();
     context.ellipse(0, 18, 18, 6, 0, 0, TAU);
@@ -916,6 +1049,13 @@ export class WormsGame {
     context.beginPath();
     context.arc(worm.facing * 8, -5, 2.3, 0, TAU);
     context.fill();
+    if (worm.hurtTime > 0) {
+      context.strokeStyle = "#171525";
+      context.lineWidth = 2.5;
+      context.beginPath();
+      context.arc(worm.facing * 4, 5, 5, Math.PI * 1.1, Math.PI * 1.9);
+      context.stroke();
+    }
     context.strokeStyle = worm.color;
     context.lineWidth = 5;
     context.beginPath();
@@ -930,6 +1070,13 @@ export class WormsGame {
     context.fill();
     context.fillStyle = worm.color;
     context.fillText(`${worm.hp} HP`, worm.x, worm.y - 28);
+    if (worm.hurtTime > 0) {
+      context.fillStyle = "#fff3ad";
+      context.font = "900 13px Rubik, sans-serif";
+      const wobble = Math.sin(worm.hurtTime * 32) * 5;
+      context.fillText("✦", worm.x - 22 + wobble, worm.y - 17);
+      context.fillText("✧", worm.x + 23 - wobble, worm.y - 12);
+    }
     if (worm.rope) {
       context.strokeStyle = "rgba(255,255,255,.8)";
       context.lineWidth = 2;
@@ -999,27 +1146,27 @@ export class WormsGame {
     context.strokeStyle = "rgba(255,255,255,.35)";
     context.lineWidth = 3;
     context.beginPath();
-    context.arc(235, 405, 39, 0, TAU);
+    context.arc(890, 430, 36, 0, TAU);
     context.fill();
     context.stroke();
     context.fillStyle = "#b7f34a";
     context.font = "900 22px Rubik, sans-serif";
     context.textAlign = "center";
-    context.fillText("↑", 235, 413);
+    context.fillText("↑", 890, 438);
 
     context.fillStyle = "rgba(255,102,140,.72)";
     context.strokeStyle = "rgba(255,255,255,.55)";
     context.beginPath();
-    context.arc(890, 340, 42, 0, TAU);
+    context.arc(890, 330, 39, 0, TAU);
     context.fill();
     context.stroke();
     context.fillStyle = "white";
     context.font = "800 13px Rubik, sans-serif";
-    context.fillText("ОГОНЬ", 890, 345);
+    context.fillText("ОГОНЬ", 890, 335);
 
     context.fillStyle = "rgba(255,255,255,.62)";
     context.font = "800 11px Rubik, sans-serif";
-    context.fillText("ДВИЖЕНИЕ", 95, 501);
+    context.fillText(this.localWorm.rope ? "ДВИЖЕНИЕ / ДЛИНА" : "ДВИЖЕНИЕ", 95, 501);
     context.fillText("ПРИЦЕЛ", 765, 501);
     context.globalAlpha = 1;
     if (this.state === "playing") {
