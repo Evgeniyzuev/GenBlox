@@ -53,8 +53,8 @@ const GAMES = {
       <p>Сними 120 HP синего червячка. Используй рельеф, ограниченный боезапас и падающие припасы.</p>
       <h3>На телефоне</h3>
       <ul>
-        <li>Левый палец двигает червячка; свайп вверх выполняет прыжок.</li>
-        <li>Правый палец задаёт направление. Отпусти его, чтобы применить выбранное оружие.</li>
+        <li>Левый стик отвечает только за движение, отдельная кнопка — за прыжок.</li>
+        <li>Правый стик задаёт направление, отдельная красная кнопка производит выстрел.</li>
         <li>Оружие переключается кнопками под ареной.</li>
       </ul>
       <h3>Клавиатура</h3>
@@ -434,6 +434,12 @@ function launchForRoom(gameId) {
       startedAt: Date.now(),
       revision,
     });
+    mode = "room";
+    setupGameShell();
+    openOverlay(elements.gameDialog, "game");
+    elements.gameDialog.requestFullscreen?.()
+      .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
+      .catch(() => {});
     return;
   }
   const previous = client.getGameState(activeGameId);

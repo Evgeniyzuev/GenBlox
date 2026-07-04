@@ -226,10 +226,14 @@ export class WormsGame {
     if (this.state !== "playing") return;
     this.canvas.setPointerCapture(event.pointerId);
     const point = this.pointerPosition(event);
-    const side = point.x < 480 ? "move" : "aim";
+    let side;
+    if (Math.hypot(point.x - 235, point.y - 405) < 70) side = "jump";
+    else if (Math.hypot(point.x - 890, point.y - 340) < 72) side = "fire";
+    else side = point.x < 480 ? "move" : "aim";
     this.pointers.set(event.pointerId, { ...point, startX: point.x, startY: point.y, side });
-    if (side === "move" && point.y < 365) this.jump();
-    if (side === "aim") this.setAimFromPointer(point);
+    if (side === "jump") this.jump();
+    else if (side === "fire") this.fire();
+    else if (side === "aim") this.setAimFromPointer(point, this.pointers.get(event.pointerId));
   }
 
   pointerMove(event) {
@@ -238,20 +242,21 @@ export class WormsGame {
     const point = this.pointerPosition(event);
     pointer.x = point.x;
     pointer.y = point.y;
-    if (pointer.side === "aim") this.setAimFromPointer(point);
+    if (pointer.side === "aim") this.setAimFromPointer(point, pointer);
   }
 
   pointerUp(event) {
     const pointer = this.pointers.get(event.pointerId);
     if (!pointer) return;
-    if (pointer.side === "aim") this.fire();
-    else if (pointer.startY - pointer.y > 55) this.jump();
     this.pointers.delete(event.pointerId);
   }
 
-  setAimFromPointer(point) {
+  setAimFromPointer(point, pointer = point) {
     const worm = this.localWorm;
-    worm.aim = Math.atan2(point.y - worm.y, point.x - worm.x);
+    const dx = point.x - pointer.startX;
+    const dy = point.y - pointer.startY;
+    if (Math.hypot(dx, dy) < 8) return;
+    worm.aim = Math.atan2(dy, dx);
     worm.facing = Math.cos(worm.aim) >= 0 ? 1 : -1;
     this.localInput.aim = worm.aim;
   }
@@ -403,7 +408,17 @@ export class WormsGame {
         worm.vy -= dy / d * excess * 24;
       }
     }
-    worm.x = clamp(worm.x + worm.vx * dt, worm.radius, 960 - worm.radius);
+    const oldX = worm.x;
+    const candidateX = clamp(worm.x + worm.vx * dt, worm.radius, 960 - worm.radius);
+    const currentGround = this.groundAt(oldX);
+    const candidateGround = this.groundAt(candidateX);
+    const rise = currentGround - candidateGround;
+    if (worm.grounded && rise > 11) {
+      worm.vx = 0;
+      worm.x = oldX;
+    } else {
+      worm.x = candidateX;
+    }
     worm.y += worm.vy * dt;
     const ground = this.groundAt(worm.x);
     if (worm.y + worm.radius >= ground && worm.vy >= 0) {
@@ -528,14 +543,25 @@ export class WormsGame {
       x: worm.x, y: worm.y, vx: worm.vx, vy: worm.vy,
       hp: worm.hp, armor: worm.armor, grounded: worm.grounded,
       facing: worm.facing, aim: worm.aim, cooldown: worm.cooldown,
-      ammo: { ...worm.ammo },
+      ammo: Object.fromEntries(
+        Object.entries(worm.ammo).map(([key, value]) => [key, value === Infinity ? -1 : value]),
+      ),
       rope: worm.rope ? { ...worm.rope } : null,
     };
   }
 
-  applyWormState(worm, state) {
+  applyWormState(worm, state, smooth = false) {
     if (!worm || !state) return;
-    Object.assign(worm, state, { ammo: { ...state.ammo } });
+    const ammo = Object.fromEntries(
+      Object.entries(state.ammo ?? {}).map(([key, value]) => [key, value === -1 ? Infinity : value]),
+    );
+    if (smooth) {
+      worm._netTarget = { x: state.x, y: state.y, vx: state.vx, vy: state.vy, aim: state.aim };
+      const { x, y, vx, vy, aim, ...rest } = state;
+      Object.assign(worm, rest, { ammo });
+    } else {
+      Object.assign(worm, state, { ammo });
+    }
   }
 
   createSnapshot() {
@@ -574,8 +600,11 @@ export class WormsGame {
       return;
     }
     if (!this.player || this.mapId !== snapshot.mapId) this.start(snapshot.mapId, false);
-    this.applyWormState(this.player, snapshot.player);
-    this.applyWormState(this.enemy, snapshot.enemy);
+    const firstSnapshot = !this.player._hasNetworkState;
+    this.applyWormState(this.player, snapshot.player, !firstSnapshot);
+    this.applyWormState(this.enemy, snapshot.enemy, !firstSnapshot);
+    this.player._hasNetworkState = true;
+    this.enemy._hasNetworkState = true;
     this.projectiles = (snapshot.projectiles ?? []).map((projectile) => ({
       ...projectile,
       owner: projectile.ownerSide === "player" ? this.player : this.enemy,
@@ -634,6 +663,22 @@ export class WormsGame {
     }
   }
 
+  updateGuestPresentation(dt) {
+    for (const worm of [this.player, this.enemy]) {
+      const target = worm._netTarget;
+      if (!target) continue;
+      const factor = 1 - Math.exp(-18 * dt);
+      worm.x += (target.x - worm.x) * factor;
+      worm.y += (target.y - worm.y) * factor;
+      worm.vx += (target.vx - worm.vx) * factor;
+      worm.vy += (target.vy - worm.vy) * factor;
+      if (worm !== this.localWorm) {
+        const angleDelta = Math.atan2(Math.sin(target.aim - worm.aim), Math.cos(target.aim - worm.aim));
+        worm.aim += angleDelta * factor;
+      }
+    }
+  }
+
   update(dt) {
     if (this.state !== "playing") return;
     this.time += dt;
@@ -654,6 +699,7 @@ export class WormsGame {
       this.localInput.aim = this.localWorm.aim;
       this.inputClock += dt;
       this.sendNetworkInput();
+      this.updateGuestPresentation(dt);
       return;
     }
 
@@ -689,14 +735,20 @@ export class WormsGame {
     context.closePath();
     context.fillStyle = gradient;
     context.fill();
-    context.strokeStyle = "#d39a5e";
-    context.lineWidth = 5;
+    context.strokeStyle = "#e1b577";
+    context.lineWidth = 7;
     context.stroke();
-    context.fillStyle = "rgba(255,255,255,.05)";
-    for (let x = 20; x < 960; x += 70) {
+    context.strokeStyle = "rgba(39,31,45,.35)";
+    context.lineWidth = 2;
+    for (let x = 20; x < 960; x += 58) {
+      const y = this.terrain[x] + 34 + (x % 4) * 9;
       context.beginPath();
-      context.arc(x, this.terrain[x] + 30, 4, 0, TAU);
-      context.fill();
+      context.moveTo(x - 24, y + 16);
+      context.lineTo(x, y - 15);
+      context.lineTo(x + 27, y + 8);
+      context.lineTo(x + 12, y + 37);
+      context.closePath();
+      context.stroke();
     }
   }
 
@@ -705,11 +757,20 @@ export class WormsGame {
     if (worm.invulnerable > 0 && Math.floor(worm.invulnerable * 30) % 2) return;
     context.save();
     context.translate(worm.x, worm.y);
+    context.fillStyle = "rgba(8,10,24,.28)";
+    context.beginPath();
+    context.ellipse(0, 18, 18, 6, 0, 0, TAU);
+    context.fill();
     context.fillStyle = worm.color;
     context.strokeStyle = "#171525";
     context.lineWidth = 4;
     context.beginPath();
     context.arc(0, 2, worm.radius, 0, TAU);
+    context.fill();
+    context.stroke();
+    context.fillStyle = worm.color;
+    context.beginPath();
+    context.arc(-worm.facing * 8, 11, 11, 0, TAU);
     context.fill();
     context.stroke();
     context.fillStyle = "white";
@@ -727,6 +788,13 @@ export class WormsGame {
     context.lineTo(-worm.facing * 11, 17);
     context.stroke();
     context.restore();
+    context.textAlign = "center";
+    context.font = "900 11px Rubik, sans-serif";
+    context.fillStyle = "rgba(16,20,39,.72)";
+    roundedRect(context, worm.x - 28, worm.y - 42, 56, 20, 8);
+    context.fill();
+    context.fillStyle = worm.color;
+    context.fillText(`${worm.hp} HP`, worm.x, worm.y - 28);
     if (worm.rope) {
       context.strokeStyle = "rgba(255,255,255,.8)";
       context.lineWidth = 2;
@@ -768,28 +836,56 @@ export class WormsGame {
 
   drawControls() {
     const context = this.context;
-    context.globalAlpha = 0.72;
-    context.strokeStyle = "rgba(255,255,255,.28)";
+    const movePointer = [...this.pointers.values()].find((pointer) => pointer.side === "move");
+    const aimPointer = [...this.pointers.values()].find((pointer) => pointer.side === "aim");
+    const drawPad = (x, y, radius, pointer, color) => {
+      context.fillStyle = "rgba(12,18,34,.38)";
+      context.strokeStyle = "rgba(255,255,255,.35)";
+      context.lineWidth = 3;
+      context.beginPath();
+      context.arc(x, y, radius, 0, TAU);
+      context.fill();
+      context.stroke();
+      context.fillStyle = color;
+      context.beginPath();
+      context.arc(
+        pointer ? x + clamp(pointer.x - pointer.startX, -radius * 0.55, radius * 0.55) : x,
+        pointer ? y + clamp(pointer.y - pointer.startY, -radius * 0.55, radius * 0.55) : y,
+        radius * 0.34, 0, TAU,
+      );
+      context.fill();
+    };
+
+    context.globalAlpha = 0.8;
+    drawPad(95, 425, 58, movePointer, "rgba(255,255,255,.26)");
+    drawPad(765, 425, 58, aimPointer, "rgba(99,220,255,.38)");
+
+    context.fillStyle = "rgba(12,18,34,.52)";
+    context.strokeStyle = "rgba(255,255,255,.35)";
     context.lineWidth = 3;
     context.beginPath();
-    context.arc(105, 440, 54, 0, TAU);
-    context.stroke();
-    const movePointer = [...this.pointers.values()].find((pointer) => pointer.side === "move");
-    context.fillStyle = "rgba(255,255,255,.2)";
-    context.beginPath();
-    context.arc(
-      movePointer ? 105 + clamp(movePointer.x - movePointer.startX, -35, 35) : 105,
-      movePointer ? 440 + clamp(movePointer.y - movePointer.startY, -35, 35) : 440,
-      22, 0, TAU,
-    );
+    context.arc(235, 405, 39, 0, TAU);
     context.fill();
-    context.beginPath();
-    context.arc(850, 430, 65, 0, TAU);
     context.stroke();
     context.fillStyle = "#b7f34a";
-    context.font = "800 13px Rubik, sans-serif";
+    context.font = "900 22px Rubik, sans-serif";
     context.textAlign = "center";
-    context.fillText("ПРИЦЕЛ / ОГОНЬ", 850, 434);
+    context.fillText("↑", 235, 413);
+
+    context.fillStyle = "rgba(255,102,140,.72)";
+    context.strokeStyle = "rgba(255,255,255,.55)";
+    context.beginPath();
+    context.arc(890, 340, 42, 0, TAU);
+    context.fill();
+    context.stroke();
+    context.fillStyle = "white";
+    context.font = "800 13px Rubik, sans-serif";
+    context.fillText("ОГОНЬ", 890, 345);
+
+    context.fillStyle = "rgba(255,255,255,.62)";
+    context.font = "800 11px Rubik, sans-serif";
+    context.fillText("ДВИЖЕНИЕ", 95, 501);
+    context.fillText("ПРИЦЕЛ", 765, 501);
     context.globalAlpha = 1;
     if (this.state === "playing") {
       context.strokeStyle = "rgba(255,255,255,.55)";
@@ -806,19 +902,45 @@ export class WormsGame {
   draw() {
     const context = this.context;
     const sky = context.createLinearGradient(0, 0, 0, 540);
-    sky.addColorStop(0, "#282653");
-    sky.addColorStop(0.65, "#535188");
-    sky.addColorStop(1, "#ee9d76");
+    sky.addColorStop(0, "#47698d");
+    sky.addColorStop(0.58, "#7794ad");
+    sky.addColorStop(1, "#c8a18c");
     context.fillStyle = sky;
     context.fillRect(0, 0, 960, 540);
-    context.fillStyle = "rgba(255,255,255,.08)";
-    for (let index = 0; index < 12; index += 1) {
+
+    context.fillStyle = "rgba(30,49,72,.18)";
+    context.beginPath();
+    context.moveTo(0, 310);
+    for (let x = 0; x <= 960; x += 60) {
+      context.lineTo(x, 245 + Math.sin(x / 85) * 38 + Math.sin(x / 31) * 13);
+    }
+    context.lineTo(960, 540);
+    context.lineTo(0, 540);
+    context.closePath();
+    context.fill();
+
+    context.fillStyle = "rgba(255,255,255,.12)";
+    for (let index = 0; index < 7; index += 1) {
+      const x = (index * 173 + 35) % 960;
+      const y = 72 + (index % 3) * 63;
       context.beginPath();
-      context.arc((index * 191 + 60) % 960, 80 + (index * 67) % 190, 2 + index % 3, 0, TAU);
+      context.ellipse(x, y, 42, 11, 0, 0, TAU);
+      context.ellipse(x + 28, y - 7, 28, 13, 0, 0, TAU);
       context.fill();
     }
     if (this.state === "maps") return;
     this.drawTerrain();
+    context.fillStyle = "rgba(25,100,119,.72)";
+    context.fillRect(0, 515, 960, 25);
+    context.strokeStyle = "rgba(137,224,220,.65)";
+    context.lineWidth = 3;
+    context.beginPath();
+    for (let x = 0; x <= 960; x += 12) {
+      const y = 515 + Math.sin(this.time * 2.4 + x / 35) * 2;
+      if (x === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.stroke();
     for (const block of this.blocks) {
       context.fillStyle = block.color;
       context.fillRect(block.x, block.y, block.width, block.height);
