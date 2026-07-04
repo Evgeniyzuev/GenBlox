@@ -41,6 +41,15 @@
       </section>
 
       <section class="spaces" aria-labelledby="spaces-title">
+        <aside class="party-panel" id="party-panel" hidden>
+          <div>
+            <p class="eyebrow">ТЕКУЩАЯ КОМНАТА</p>
+            <strong id="party-code">Код: —</strong>
+          </div>
+          <span id="party-players">Игроков: 1 / 2</span>
+          <span>Любой участник может запустить спейс для всей комнаты</span>
+        </aside>
+
         <div class="section-heading">
           <div>
             <p class="eyebrow">СПЕЙС 001</p>
@@ -59,9 +68,23 @@
           </div>
           <div class="card-copy">
             <p>Классическая партия 3 × 3 для двух игроков.</p>
-            <button class="primary-button" id="play-button" type="button">
-              Играть онлайн
-            </button>
+            <div class="card-actions">
+              <button class="secondary-button" id="play-solo" type="button">
+                Играть одному
+              </button>
+              <button class="primary-button" id="find-public-room" type="button">
+                Найти открытую комнату
+              </button>
+              <button class="secondary-button" id="create-private-room" type="button">
+                Создать приватную
+              </button>
+              <button class="primary-button" id="launch-for-room" type="button" hidden>
+                Запустить для всей комнаты
+              </button>
+            </div>
+            <small class="card-hint">
+              Открытая игра найдётся автоматически. В приватную друга можно пригласить кодом или QR.
+            </small>
           </div>
         </article>
       </section>
@@ -74,7 +97,7 @@
             <p class="eyebrow">СПЕЙС 001</p>
             <h2>Крестики-нолики</h2>
           </div>
-          <button class="icon-button" id="close-game" type="button" aria-label="Закрыть">×</button>
+          <button class="icon-button" id="close-game" type="button" aria-label="Вернуться в каталог">×</button>
         </header>
 
         <div class="room-info">
@@ -84,10 +107,10 @@
 
         <div class="scoreboard">
           <div class="player-card" data-player="X">
-            <span>×</span><small>Хозяин комнаты</small><strong id="score-x">0</strong>
+            <span>×</span><small id="name-x">Игрок</small><strong id="score-x">0</strong>
           </div>
           <div class="player-card" data-player="O">
-            <span>○</span><small>Второй игрок</small><strong id="score-o">0</strong>
+            <span>○</span><small id="name-o">Соперник</small><strong id="score-o">0</strong>
           </div>
         </div>
 
