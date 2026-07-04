@@ -112,6 +112,31 @@
             </div>
           </div>
           </article>
+
+          <article class="space-card worms-card">
+            <div class="card-preview worms-preview" aria-hidden="true">
+              <div class="worms-sky">
+                <span class="worms-cloud"></span>
+                <i class="worms-worm one">●</i>
+                <i class="worms-worm two">●</i>
+                <b class="worms-crate">?</b>
+              </div>
+            </div>
+            <div class="card-copy">
+              <p class="eyebrow">СПЕЙС 003</p>
+              <h2>Червячки</h2>
+              <p>Дуэль в реальном времени: разрушаемый рельеф, оружие, верёвка, копание, блоки и ценные припасы.</p>
+              <div class="card-actions">
+                <button class="secondary-button play-solo" data-game="worms" type="button">
+                  Играть против компьютера
+                </button>
+                <button class="primary-button launch-for-room" data-game="worms" type="button" hidden disabled>
+                  Сетевая дуэль — следующий этап
+                </button>
+              </div>
+              <small class="card-hint">Mobile-first: поверни телефон горизонтально и играй двумя большими пальцами.</small>
+            </div>
+          </article>
         </div>
       </section>
     </main>
@@ -199,6 +224,7 @@
 
         <p class="game-status" id="game-status" aria-live="polite">Ждём второго игрока…</p>
         <div class="game-board" id="game-board" role="grid" aria-label="Поле крестиков-ноликов"></div>
+        <div class="worms-stage" id="worms-stage" hidden></div>
 
         <div class="game-actions">
           <button class="secondary-button" id="new-round" type="button">Новый раунд</button>

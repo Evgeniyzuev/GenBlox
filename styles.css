@@ -289,6 +289,195 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   background: #171525;
 }
 .mini-checkers i.white::after { background: #eee9dd; }
+.worms-preview {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(#38366c 0 48%, #e49570 100%);
+}
+.worms-sky {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.worms-sky::after {
+  position: absolute;
+  right: -8%;
+  bottom: -28%;
+  left: -8%;
+  height: 60%;
+  border-radius: 50% 48% 0 0;
+  content: "";
+  background: linear-gradient(#b2794c, #4f3037);
+  box-shadow: inset 0 8px #e6af67;
+}
+.worms-cloud {
+  position: absolute;
+  top: 48px;
+  left: 42px;
+  width: 72px;
+  height: 19px;
+  border-radius: 20px;
+  background: rgba(255,255,255,.18);
+  box-shadow: 35px -12px rgba(255,255,255,.12);
+}
+.worms-worm {
+  position: absolute;
+  z-index: 2;
+  bottom: 31%;
+  color: var(--pink);
+  font-size: 43px;
+  font-style: normal;
+  text-shadow: 0 5px #171525;
+}
+.worms-worm.one { left: 19%; }
+.worms-worm.two { right: 19%; bottom: 39%; color: var(--cyan); }
+.worms-crate {
+  position: absolute;
+  z-index: 2;
+  top: 32%;
+  left: 48%;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: #171525;
+  background: var(--lime);
+  box-shadow: 4px 4px #171525;
+  transform: rotate(7deg);
+}
+
+.worms-stage {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #171525;
+  touch-action: none;
+}
+.worms-stage[hidden] { display: none; }
+.worms-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  background: #282653;
+  touch-action: none;
+  user-select: none;
+}
+.worms-toolbar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(54px, 1fr));
+  gap: 6px;
+  padding: 8px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  background: #171525;
+}
+.worms-toolbar[hidden] { display: none; }
+.worms-toolbar button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 54px;
+  padding: 5px 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.worms-toolbar button.is-selected {
+  border-color: var(--lime);
+  color: var(--lime);
+  background: rgba(183,243,74,.12);
+  box-shadow: inset 0 0 0 1px var(--lime);
+}
+.worms-toolbar b { font-size: 20px; line-height: 1; }
+.worms-toolbar span { overflow: hidden; max-width: 100%; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.worms-toolbar small {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 800;
+}
+.worms-map-choice {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-content: center;
+  gap: 14px;
+  padding: clamp(16px, 4vw, 48px);
+  background: linear-gradient(145deg, rgba(21,20,37,.92), rgba(42,40,68,.94));
+}
+.worms-map-choice[hidden] { display: none; }
+.worms-map-heading { grid-column: 1 / -1; display: grid; gap: 5px; text-align: center; }
+.worms-map-heading small { color: var(--lime); font-size: 10px; font-weight: 900; letter-spacing: 2px; }
+.worms-map-heading strong { font-size: clamp(20px, 4vw, 38px); }
+.worms-map-button {
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  gap: 5px;
+  min-height: 150px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--panel-2);
+  cursor: pointer;
+  text-align: left;
+}
+.worms-map-button span {
+  min-height: 70px;
+  border-radius: 9px;
+  background:
+    radial-gradient(circle at 35% 25%, rgba(255,255,255,.27) 0 4%, transparent 5%),
+    linear-gradient(165deg, transparent 0 47%, var(--map-a) 48% 65%, var(--map-b) 66%);
+}
+.worms-map-button strong { font-size: clamp(13px, 2vw, 18px); }
+.worms-map-button small { color: var(--muted); font-size: 9px; }
+.worms-map-button:hover, .worms-map-button:focus-visible { border-color: var(--lime); transform: translateY(-2px); }
+.worms-restart {
+  position: absolute;
+  z-index: 4;
+  top: 61%;
+  left: 50%;
+  padding: 13px 20px;
+  border: 0;
+  border-radius: 10px;
+  color: #171525;
+  background: var(--lime);
+  cursor: pointer;
+  font-weight: 900;
+  transform: translateX(-50%);
+}
+
+#game-dialog.is-worms {
+  width: min(1200px, 100vw);
+  max-width: none;
+  max-height: 100dvh;
+  margin: auto;
+  overflow: hidden;
+  border: 0;
+  background: #171525;
+}
+#game-dialog.is-worms:fullscreen {
+  width: 100vw;
+  height: 100dvh;
+}
+#game-dialog.is-worms .game-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: min(100dvh, 760px);
+  padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+}
+#game-dialog.is-worms .game-header { flex: 0 0 auto; align-items: center; padding: 0 4px 5px; }
+#game-dialog.is-worms .game-header h2 { font-size: clamp(18px, 3vw, 30px); }
+#game-dialog.is-worms .game-header .eyebrow { margin-bottom: 3px; }
+#game-dialog.is-worms .game-status { min-height: 17px; margin: 0 0 4px; font-size: 11px; }
+#game-dialog.is-worms .worms-stage { flex: 1 1 auto; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+#game-dialog.is-worms .worms-canvas { width: 100%; height: 100%; object-fit: contain; }
 .help-content { color: var(--muted); line-height: 1.65; }
 .help-content h3 { margin: 24px 0 8px; color: var(--ink); }
 .help-content ul { padding-left: 20px; }
@@ -313,4 +502,32 @@ footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--mut
   .menu-shell { padding: 20px; }
   .invite-box { grid-template-columns: 1fr; }
   #room-qr { margin: auto; }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  #game-dialog.is-worms .game-header h2 { font-size: 17px; }
+  #game-dialog.is-worms .game-header .eyebrow,
+  #game-dialog.is-worms .game-status { display: none; }
+  #game-dialog.is-worms .icon-button { width: 34px; height: 34px; font-size: 19px; }
+  .worms-toolbar button { min-height: 46px; }
+  .worms-toolbar span { display: none; }
+  .worms-map-choice { padding: 12px 26px; }
+  .worms-map-button { min-height: 112px; }
+}
+
+@media (orientation: portrait) and (max-width: 720px) {
+  #game-dialog.is-worms .worms-stage::after {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    display: grid;
+    place-items: center;
+    padding: 32px;
+    content: "↻  Поверни телефон горизонтально";
+    color: var(--lime);
+    background: rgba(21,20,37,.95);
+    font-size: 20px;
+    font-weight: 900;
+    text-align: center;
+  }
 }

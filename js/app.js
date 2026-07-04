@@ -14,6 +14,7 @@ import {
   isCheckersState,
   playCheckersMove,
 } from "./games/checkers.js";
+import { WormsGame } from "./games/worms.js";
 
 const GAMES = {
   "tic-tac-toe": {
@@ -43,6 +44,21 @@ const GAMES = {
         <li>На последней горизонтали шашка становится дамкой.</li>
         <li>Дамка ходит и бьёт на любое расстояние по диагонали.</li>
       </ul>`,
+  },
+  worms: {
+    title: "Червячки",
+    kicker: "СПЕЙС 003 · REALTIME",
+    help: `
+      <h3>Цель</h3>
+      <p>Сними 120 HP синего червячка. Используй рельеф, ограниченный боезапас и падающие припасы.</p>
+      <h3>На телефоне</h3>
+      <ul>
+        <li>Левый палец двигает червячка; свайп вверх выполняет прыжок.</li>
+        <li>Правый палец задаёт направление. Отпусти его, чтобы применить выбранное оружие.</li>
+        <li>Оружие переключается кнопками под ареной.</li>
+      </ul>
+      <h3>Клавиатура</h3>
+      <p>A/D или стрелки — движение, W — прыжок, мышь — прицел, пробел — огонь, 1–7 — выбор инструмента.</p>`,
   },
 };
 
@@ -81,6 +97,7 @@ const elements = {
   closeHelp: $("#close-game-help"),
   closeGame: $("#close-game"),
   board: $("#game-board"),
+  wormsStage: $("#worms-stage"),
   gameStatus: $("#game-status"),
   role: $("#role-label"),
   players: $("#players-label"),
@@ -93,6 +110,9 @@ const elements = {
   newRound: $("#new-round"),
   hint: $("#game-hint"),
   cards: [...document.querySelectorAll(".player-card")],
+  scoreboard: $(".scoreboard"),
+  roomInfo: $(".room-info"),
+  gameActions: $(".game-actions"),
 };
 
 const connectionButtons = [elements.findPublic, elements.createPrivate, elements.joinForm.querySelector("button")];
@@ -108,6 +128,7 @@ let lastPlayerCount = -1;
 let syncTimer = null;
 let computerTimer = null;
 let suppressGameReturn = false;
+let wormsGame = null;
 
 function buildBoard(gameId) {
   elements.board.replaceChildren();
@@ -310,10 +331,18 @@ function setupGameShell() {
   elements.gameTitle.textContent = game.title;
   elements.helpTitle.textContent = `Правила: ${game.title}`;
   elements.helpContent.innerHTML = game.help;
+  const isWorms = activeGameId === "worms";
+  elements.board.hidden = isWorms;
+  elements.wormsStage.hidden = !isWorms;
+  elements.scoreboard.hidden = isWorms;
+  elements.roomInfo.hidden = isWorms;
+  elements.gameActions.hidden = isWorms;
+  elements.hint.hidden = isWorms;
+  elements.gameDialog.classList.toggle("is-worms", isWorms);
   elements.board.setAttribute("aria-label", `Поле игры «${game.title}»`);
   elements.markX.textContent = activeGameId === "checkers" ? "●" : "×";
   elements.markO.textContent = activeGameId === "checkers" ? "○" : "○";
-  buildBoard(activeGameId);
+  if (!isWorms) buildBoard(activeGameId);
   selectedChecker = null;
   lastRevision = -1;
 }
@@ -338,6 +367,19 @@ function createGameForActive(previous = null) {
 function openSoloGame(gameId) {
   activeGameId = gameId;
   mode = "solo";
+  if (activeGameId === "worms") {
+    setupGameShell();
+    elements.gameStatus.textContent = "Выбери одну из трёх карт";
+    openOverlay(elements.gameDialog, "game");
+    wormsGame?.destroy();
+    wormsGame = new WormsGame(elements.wormsStage, {
+      onStatus: (message) => { elements.gameStatus.textContent = message; },
+    });
+    elements.gameDialog.requestFullscreen?.()
+      .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
+      .catch(() => {});
+    return;
+  }
   localGame = createGameForActive(null);
   setupGameShell();
   const humanSide = activeGameId === "checkers" ? CHECKER_COLORS.BLACK : "X";
@@ -354,6 +396,7 @@ function openSoloGame(gameId) {
 }
 
 function launchForRoom(gameId) {
+  if (gameId === "worms") return;
   activeGameId = gameId;
   const previous = client.getGameState(activeGameId);
   lastRevision = -1;
@@ -504,6 +547,11 @@ function renderCheckers(game, playerCount, mySide) {
 
 function requestCloseGame() {
   clearTimeout(computerTimer);
+  if (wormsGame) {
+    wormsGame.destroy();
+    wormsGame = null;
+  }
+  if (document.fullscreenElement === elements.gameDialog) document.exitFullscreen?.().catch(() => {});
   if (mode === "room" && client) {
     if (!confirm("Завершить игру и вернуть всю комнату в каталог?")) return;
     const revision = (client.getRoomState()?.revision ?? 0) + 1;
@@ -554,6 +602,11 @@ function handlePopState() {
     return;
   }
   if (elements.gameDialog.open) {
+    if (wormsGame) {
+      wormsGame.destroy();
+      wormsGame = null;
+    }
+    if (document.fullscreenElement === elements.gameDialog) document.exitFullscreen?.().catch(() => {});
     elements.gameDialog.close();
     if (mode === "room" && client && !suppressGameReturn) {
       const revision = (client.getRoomState()?.revision ?? 0) + 1;
