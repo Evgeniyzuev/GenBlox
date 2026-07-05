@@ -596,3 +596,104 @@ footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--mut
     text-align: center;
   }
 }
+
+/* Micro Machines стили */
+.micro-preview {
+  background: #1a1a2e;
+  position: relative;
+  overflow: hidden;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.micro-track {
+  width: 90%;
+  height: 60px;
+  background: #2a2a44;
+  border-radius: 30px;
+  position: relative;
+  border: 2px solid #3d3d5c;
+  overflow: hidden;
+}
+
+.micro-track::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(255,255,255,0.2) 0px,
+    rgba(255,255,255,0.2) 10px,
+    transparent 10px,
+    transparent 20px
+  );
+  transform: translateY(-50%);
+}
+
+.micro-car {
+  position: absolute;
+  font-size: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  animation: micro-race 3s ease-in-out infinite;
+  text-shadow: 0 0 10px currentColor;
+}
+
+.micro-car.red {
+  color: #ff668c;
+  animation-delay: 0s;
+  left: 5%;
+}
+
+.micro-car.blue {
+  color: #63dcff;
+  animation-delay: 0.8s;
+  left: 15%;
+}
+
+.micro-car.green {
+  color: #7bed7b;
+  animation-delay: 1.6s;
+  left: 25%;
+}
+
+@keyframes micro-race {
+  0%, 100% { left: 5%; }
+  25% { left: 85%; }
+  50% { left: 50%; }
+  75% { left: 90%; }
+}
+
+.micro-checkered {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 32px;
+  background: repeating-conic-gradient(
+    black 0% 25%,
+    white 0% 50%
+  ) 0 0 / 8px 8px;
+  border-radius: 2px;
+  opacity: 0.6;
+}
+
+.micro-machines-card .card-preview {
+  min-height: 120px;
+}
+
+/* Адаптив для Micro Machines */
+@media (max-width: 768px) {
+  .micro-track {
+    height: 40px;
+  }
+  .micro-car {
+    font-size: 14px;
+  }
+}
