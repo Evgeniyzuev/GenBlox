@@ -151,7 +151,7 @@ const elements = {
   gameActions: $(".game-actions"),
 };
 
-const connectionButtons = [elements.findPublic, elements.createPrivate, elements.joinForm?.querySelector("button")];
+const connectionButtons = [elements.findPublic, elements.createPrivate, elements.joinForm.querySelector("button")];
 let client = null;
 let roomKind = null;
 let mode = "catalog";
