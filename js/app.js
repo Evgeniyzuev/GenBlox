@@ -1,4 +1,3 @@
-// js/app.js
 import { PlayroomClient } from "./core/playroom-client.js";
 import {
   chooseComputerMove,
@@ -16,7 +15,6 @@ import {
   playCheckersMove,
 } from "./games/checkers.js";
 import { WormsGame } from "./games/worms.js";
-import { MicroMachinesGame } from "./games/microMachines.js";
 
 const GAMES = {
   "tic-tac-toe": {
@@ -64,32 +62,6 @@ const GAMES = {
       <h3>Клавиатура</h3>
       <p>A/D или стрелки — движение, W — прыжок/укоротить верёвку, S — удлинить, пробел — огонь, 1–9 — выбор инструмента.</p>`,
   },
-  "micro-machines": {
-    title: "Micro Machines",
-    kicker: "СПЕЙС 004 · RACING",
-    help: `
-      <h3>Цель</h3>
-      <p>Первым завершить 3 круга и финишировать! Обгоняй соперников на извилистых трассах.</p>
-      <h3>Трассы</h3>
-      <ul>
-        <li><strong>Овал</strong> — классический скоростной трек. Простая трасса для отработки навыков.</li>
-        <li><strong>Петля</strong> — извилистая трасса с крутыми поворотами. Требует точности управления.</li>
-        <li><strong>Восьмёрка</strong> — сложная трасса с перекрёстком. Осторожно на поворотах!</li>
-      </ul>
-      <h3>Управление</h3>
-      <ul>
-        <li><strong>W / ↑</strong> — газ</li>
-        <li><strong>S / ↓</strong> — тормоз</li>
-        <li><strong>A / ←</strong> — поворот влево</li>
-        <li><strong>D / →</strong> — поворот вправо</li>
-      </ul>
-      <h3>Советы</h3>
-      <ul>
-        <li>Следи за чекпоинтами — они отмечают прогресс на трассе.</li>
-        <li>Столкновения с другими машинами могут отбросить назад.</li>
-        <li>Попробуй разные трассы — каждая требует своей стратегии.</li>
-      </ul>`,
-  },
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -102,7 +74,7 @@ const elements = {
   connected: $("#room-connected"),
   findPublic: $("#find-public-room"),
   createPrivate: $("#create-private-room"),
-  joinForm: $("#join-form"),
+  joinForm: $("#join-room-form"),
   roomCodeInput: $("#room-code"),
   roomCodeDisplay: $("#room-code-display"),
   roomKind: $("#room-kind-label"),
@@ -128,12 +100,9 @@ const elements = {
   closeGame: $("#close-game"),
   board: $("#game-board"),
   wormsStage: $("#worms-stage"),
-  microStage: $("#micro-stage"),
   classicGameView: $("#classic-game-view"),
   wormsGameView: $("#worms-game-view"),
-  microGameView: $("#micro-machines-game-view"),
   wormsStatus: $("#worms-status"),
-  microStatus: $("#micro-status"),
   gameStatus: $("#game-status"),
   role: $("#role-label"),
   players: $("#players-label"),
@@ -165,7 +134,6 @@ let syncTimer = null;
 let computerTimer = null;
 let suppressGameReturn = false;
 let wormsGame = null;
-let microMachinesGame = null;
 
 function buildBoard(gameId) {
   elements.board.replaceChildren();
@@ -330,15 +298,14 @@ function syncRoom() {
   const room = client.getRoomState();
 
   if (room?.screen === "game" && GAMES[room.activeGame]) {
-    const isClassic = room.activeGame !== "worms" && room.activeGame !== "micro-machines";
-    const gameChanged = configuredGameId !== room.activeGame;
+    const expectedCells = room.activeGame === "checkers" ? 64 : 9;
+    const gameChanged = configuredGameId !== room.activeGame || elements.board.children.length !== expectedCells;
     activeGameId = room.activeGame;
     mode = "room";
     if (gameChanged) setupGameShell();
     setupRoomLabels();
     openOverlay(elements.gameDialog, "game");
     const game = client.getGameState(activeGameId);
-    
     if (activeGameId === "worms") {
       if (!wormsGame) {
         wormsGame = new WormsGame(elements.wormsStage, {
@@ -354,23 +321,6 @@ function syncRoom() {
       wormsGame.applyNetworkSnapshot(game);
       return;
     }
-    
-    if (activeGameId === "micro-machines") {
-      if (!microMachinesGame) {
-        microMachinesGame = new MicroMachinesGame(elements.microStage, {
-          onStatus: (message) => { elements.microStatus.textContent = message; },
-          network: {
-            role: client.isHost ? "host" : "guest",
-            publish: (snapshot) => client.setGameState("micro-machines", snapshot, false),
-            sendInput: (input) => client.setLocalPlayerState("micro-machines:input", input, false),
-            getRemoteInput: () => client.getRemotePlayerState("micro-machines:input"),
-          },
-        });
-      }
-      microMachinesGame.applyNetworkSnapshot?.(game);
-      return;
-    }
-    
     if (isValidGameState(game)) renderGame(game, client.playerCount, roomPlayerSide());
   } else if (elements.gameDialog.open && mode === "room") {
     closeGameFromSync();
@@ -385,19 +335,6 @@ function renderParty() {
 }
 
 function setupRoomLabels() {
-  if (activeGameId === "worms" || activeGameId === "micro-machines") {
-    const label = activeGameId === "worms" ? "Червячки" : "Micro Machines";
-    elements.role.textContent = client.isHost ? `Ты — хост (${label})` : `Ты — гость (${label})`;
-    elements.players.textContent = `Игроков: ${Math.min(client.playerCount, 2)} / 2`;
-    elements.nameX.textContent = "Хозяин комнаты";
-    elements.nameO.textContent = "Второй игрок";
-    elements.newRound.hidden = true;
-    elements.hint.textContent = activeGameId === "worms" 
-      ? "Кнопка × завершает игру и возвращает всю комнату в каталог." 
-      : "Гонка на выживание — первым финишируй!";
-    return;
-  }
-  
   const side = roomPlayerSide();
   elements.role.textContent = activeGameId === "checkers"
     ? `Ты играешь за ${side === CHECKER_COLORS.BLACK ? "чёрных" : "белых"}`
@@ -411,47 +348,27 @@ function setupRoomLabels() {
 
 function setupGameShell() {
   const game = GAMES[activeGameId];
-  if (!game) return;
   configuredGameId = activeGameId;
   elements.gameKicker.textContent = game.kicker;
   elements.gameTitle.textContent = game.title;
   elements.helpTitle.textContent = `Правила: ${game.title}`;
   elements.helpContent.innerHTML = game.help;
-  
   const isWorms = activeGameId === "worms";
-  const isMicro = activeGameId === "micro-machines";
-  const isClassic = !isWorms && !isMicro;
-  
-  elements.classicGameView.hidden = !isClassic;
+  elements.classicGameView.hidden = isWorms;
   elements.wormsGameView.hidden = !isWorms;
-  elements.microGameView.hidden = !isMicro;
-  
   elements.gameDialog.classList.toggle("is-worms", isWorms);
-  elements.gameDialog.classList.toggle("is-micro", isMicro);
-  
-  if (isClassic) {
-    elements.board.setAttribute("aria-label", `Поле игры «${game.title}»`);
-    elements.markX.textContent = activeGameId === "checkers" ? "●" : "×";
-    elements.markO.textContent = activeGameId === "checkers" ? "○" : "○";
+  elements.board.setAttribute("aria-label", `Поле игры «${game.title}»`);
+  elements.markX.textContent = activeGameId === "checkers" ? "●" : "×";
+  elements.markO.textContent = activeGameId === "checkers" ? "○" : "○";
+  if (!isWorms) {
     wormsGame?.destroy();
     wormsGame = null;
-    microMachinesGame?.destroy();
-    microMachinesGame = null;
     buildBoard(activeGameId);
-  } else if (isWorms) {
-    microMachinesGame?.destroy();
-    microMachinesGame = null;
-    elements.wormsStatus.textContent = mode === "room" && client
-      ? (client.isHost ? "Выбери карту для сетевого матча" : "Хозяин комнаты выбирает карту…")
-      : "Выбери одну из трёх карт";
-  } else if (isMicro) {
-    wormsGame?.destroy();
-    wormsGame = null;
-    elements.microStatus.textContent = mode === "room" && client
-      ? (client.isHost ? "Выбери трассу для гонки" : "Хозяин комнаты выбирает трассу…")
-      : "Выбери трассу для гонки";
+  } else if (mode === "room") {
+    elements.wormsStatus.textContent = client.isHost
+      ? "Выбери карту для сетевого матча"
+      : "Хозяин комнаты выбирает карту…";
   }
-  
   selectedChecker = null;
   lastRevision = -1;
 }
@@ -476,7 +393,6 @@ function createGameForActive(previous = null) {
 function openSoloGame(gameId) {
   activeGameId = gameId;
   mode = "solo";
-  
   if (activeGameId === "worms") {
     setupGameShell();
     elements.wormsStatus.textContent = "Выбери одну из трёх карт";
@@ -490,21 +406,6 @@ function openSoloGame(gameId) {
       .catch(() => {});
     return;
   }
-  
-  if (activeGameId === "micro-machines") {
-    setupGameShell();
-    elements.microStatus.textContent = "Выбери трассу для гонки";
-    openOverlay(elements.gameDialog, "game");
-    microMachinesGame?.destroy();
-    microMachinesGame = new MicroMachinesGame(elements.microStage, {
-      onStatus: (message) => { elements.microStatus.textContent = message; },
-    });
-    elements.gameDialog.requestFullscreen?.()
-      .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
-      .catch(() => {});
-    return;
-  }
-  
   localGame = createGameForActive(null);
   setupGameShell();
   const humanSide = activeGameId === "checkers" ? CHECKER_COLORS.BLACK : "X";
@@ -522,16 +423,16 @@ function openSoloGame(gameId) {
 
 function launchForRoom(gameId) {
   activeGameId = gameId;
-  
-  if (gameId === "worms" || gameId === "micro-machines") {
-    const initialState = gameId === "worms" 
-      ? { kind: "worms", phase: "selecting", revision: Date.now() }
-      : { kind: "micro-machines", phase: "selecting", revision: Date.now() };
-    client.setGameState(gameId, initialState);
+  if (gameId === "worms") {
+    client.setGameState("worms", {
+      kind: "worms",
+      phase: "selecting",
+      revision: Date.now(),
+    });
     const revision = (client.getRoomState()?.revision ?? 0) + 1;
     client.setRoomState({
       screen: "game",
-      activeGame: gameId,
+      activeGame: "worms",
       startedAt: Date.now(),
       revision,
     });
@@ -543,7 +444,6 @@ function launchForRoom(gameId) {
       .catch(() => {});
     return;
   }
-  
   const previous = client.getGameState(activeGameId);
   lastRevision = -1;
   client.setGameState(activeGameId, createGameForActive(previous));
@@ -697,10 +597,6 @@ function requestCloseGame() {
     wormsGame.destroy();
     wormsGame = null;
   }
-  if (microMachinesGame) {
-    microMachinesGame.destroy();
-    microMachinesGame = null;
-  }
   if (document.fullscreenElement === elements.gameDialog) document.exitFullscreen?.().catch(() => {});
   if (mode === "room" && client) {
     if (!confirm("Завершить игру и вернуть всю комнату в каталог?")) return;
@@ -756,10 +652,6 @@ function handlePopState() {
       wormsGame.destroy();
       wormsGame = null;
     }
-    if (microMachinesGame) {
-      microMachinesGame.destroy();
-      microMachinesGame = null;
-    }
     if (document.fullscreenElement === elements.gameDialog) document.exitFullscreen?.().catch(() => {});
     elements.gameDialog.close();
     if (mode === "room" && client && !suppressGameReturn) {
@@ -773,7 +665,6 @@ function handlePopState() {
   if (elements.roomDialog.open) elements.roomDialog.close();
 }
 
-// Event listeners
 elements.openRoomMenu.addEventListener("click", () => openOverlay(elements.roomDialog, "room"));
 elements.findPublic.addEventListener("click", () => connectRoom({ matchmaking: true, kind: "public" }, elements.findPublic));
 elements.createPrivate.addEventListener("click", () => connectRoom({ kind: "private" }, elements.createPrivate));
@@ -810,7 +701,6 @@ elements.helpDialog.addEventListener("cancel", (event) => {
 });
 window.addEventListener("popstate", handlePopState);
 
-// Initial setup
 buildBoard("tic-tac-toe");
 
 const invitedCode = roomCodeFromUrl();

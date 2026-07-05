@@ -89,28 +89,28 @@
           </div>
           </article>
 
-          <article class="space-card checkers-card">
-            <div class="card-preview checkers-preview" aria-hidden="true">
-              <div class="mini-checkers">
-                <i></i><i class="dark"></i><i></i><i class="dark white"></i>
-                <i class="dark black"></i><i></i><i class="dark"></i><i></i>
-                <i></i><i class="dark"></i><i></i><i class="dark white"></i>
-                <i class="dark black"></i><i></i><i class="dark"></i><i></i>
-              </div>
+          <article class="space-card">
+          <div class="card-preview checkers-preview" aria-hidden="true">
+            <div class="mini-checkers">
+              <i></i><i class="dark"></i><i></i><i class="dark white"></i>
+              <i class="dark black"></i><i></i><i class="dark"></i><i></i>
+              <i></i><i class="dark"></i><i></i><i class="dark white"></i>
+              <i class="dark black"></i><i></i><i class="dark"></i><i></i>
             </div>
-            <div class="card-copy">
-              <p class="eyebrow">СПЕЙС 002</p>
-              <h2>Шашки</h2>
-              <p>Русские шашки на поле 8 × 8 с обязательным взятием и дамками.</p>
-              <div class="card-actions">
-                <button class="secondary-button play-solo" data-game="checkers" type="button">
-                  Играть одному
-                </button>
-                <button class="primary-button launch-for-room" data-game="checkers" type="button" hidden>
-                  Запустить для всей комнаты
-                </button>
-              </div>
+          </div>
+          <div class="card-copy">
+            <p class="eyebrow">СПЕЙС 002</p>
+            <h2>Шашки</h2>
+            <p>Русские шашки на поле 8 × 8 с обязательным взятием и дамками.</p>
+            <div class="card-actions">
+              <button class="secondary-button play-solo" data-game="checkers" type="button">
+                Играть одному
+              </button>
+              <button class="primary-button launch-for-room" data-game="checkers" type="button" hidden>
+                Запустить для всей комнаты
+              </button>
             </div>
+          </div>
           </article>
 
           <article class="space-card worms-card">
@@ -135,31 +135,6 @@
                 </button>
               </div>
               <small class="card-hint">Mobile-first: поверни телефон горизонтально и играй двумя большими пальцами.</small>
-            </div>
-          </article>
-
-          <article class="space-card micro-machines-card">
-            <div class="card-preview micro-preview" aria-hidden="true">
-              <div class="micro-track">
-                <span class="micro-car red">●</span>
-                <span class="micro-car blue">●</span>
-                <span class="micro-car green">●</span>
-                <span class="micro-checkered"></span>
-              </div>
-            </div>
-            <div class="card-copy">
-              <p class="eyebrow">СПЕЙС 004</p>
-              <h2>Micro Machines</h2>
-              <p>Гоночная дуэль на трёх трассах: Овал, Петля и Восьмёрка. Первым финишируй!</p>
-              <div class="card-actions">
-                <button class="secondary-button play-solo" data-game="micro-machines" type="button">
-                  Играть против ботов
-                </button>
-                <button class="primary-button launch-for-room" data-game="micro-machines" type="button" hidden>
-                  Запустить сетевую гонку
-                </button>
-              </div>
-              <small class="card-hint">Управление: W/↑ — газ, S/↓ — тормоз, A/← и D/→ — повороты.</small>
             </div>
           </article>
         </div>
@@ -262,11 +237,6 @@
         <section id="worms-game-view" hidden>
           <p class="game-status worms-status" id="worms-status" aria-live="polite">Выбери одну из трёх карт</p>
           <div class="worms-stage" id="worms-stage"></div>
-        </section>
-
-        <section id="micro-machines-game-view" hidden>
-          <p class="game-status micro-status" id="micro-status" aria-live="polite">Выбери трассу для гонки</p>
-          <div class="micro-stage" id="micro-stage"></div>
         </section>
       </div>
     </dialog>
