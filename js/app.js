@@ -16,7 +16,7 @@ import {
   playCheckersMove,
 } from "./games/checkers.js";
 import { WormsGame } from "./games/worms.js";
-import { MicroMachinesGame } from "./games/micromachines.js";
+import { MicroMachinesGame } from "./games/microMachines.js";
 
 const GAMES = {
   "tic-tac-toe": {
