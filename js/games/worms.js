@@ -223,32 +223,66 @@ export class WormsGame {
     );
   }
 
-  circleHitsSolid(x, y, radius) {
-    const testRadius = Math.max(2, radius - 2);
-    if (this.isTerrainSolid(x, y) || this.isBlockSolid(x, y)) return true;
-    for (let index = 0; index < 16; index += 1) {
-      const angle = index / 16 * TAU;
-      const px = x + Math.cos(angle) * testRadius;
-      const py = y + Math.sin(angle) * testRadius;
-      if (this.isTerrainSolid(px, py) || this.isBlockSolid(px, py)) return true;
-    }
-    return false;
+circleHitsSolid(x, y, radius) {
+  const testRadius = Math.max(2, radius - 1);
+  // Проверяем центр и все точки по окружности
+  if (this.isTerrainSolid(Math.round(x), Math.round(y)) || this.isBlockSolid(x, y)) return true;
+  
+  // Проверяем больше точек для более точного определения столкновения
+  const steps = 24;
+  for (let index = 0; index < steps; index += 1) {
+    const angle = index / steps * TAU;
+    const px = x + Math.cos(angle) * testRadius;
+    const py = y + Math.sin(angle) * testRadius;
+    const col = Math.round(px);
+    const row = Math.round(py);
+    if (col < 0 || col >= 960 || row >= 540) continue;
+    if (row < 0) continue;
+    if (this.isTerrainSolid(col, row) || this.isBlockSolid(px, py)) return true;
   }
+    // Дополнительная проверка для нижней части червячка
+  // Это помогает предотвратить проваливание на краях
+  for (let offset = -radius * 0.7; offset <= radius * 0.7; offset += radius * 0.3) {
+    const px = x + offset;
+    const py = y + radius * 0.9;
+    const col = Math.round(px);
+    const row = Math.round(py);
+    if (col < 0 || col >= 960 || row >= 540) continue;
+    if (row < 0) continue;
+    if (this.isTerrainSolid(col, row) || this.isBlockSolid(px, py)) return true;
+  }
+  
+  return false;
+}
 
-  groundAt(x, startY = 0) {
-    const column = clamp(Math.round(x), 0, 959);
-    let ground = 540;
-    for (let row = clamp(Math.floor(startY), 0, 539); row < 540; row += 1) {
-      if (this.terrain[row * 960 + column]) {
-        ground = row;
+groundAt(x, startY = 0) {
+  const column = clamp(Math.round(x), 0, 959);
+  let ground = 540;
+  const startRow = clamp(Math.floor(startY), 0, 539);
+  for (let row = startRow; row < 540; row += 1) {
+    if (this.terrain[row * 960 + column]) {
+      ground = row;
+      break;
+    }
+  }
+  for (const block of this.blocks) {
+    if (x >= block.x && x <= block.x + block.width && block.y >= startY) {
+      ground = Math.min(ground, block.y);
+    }
+  }
+  // Проверяем соседние колонки для более точного определения поверхности
+  // Это помогает на крутых склонах
+  for (let offset = -1; offset <= 1; offset += 1) {
+    const adjColumn = clamp(column + offset, 0, 959);
+    for (let row = Math.max(0, ground - 10); row < Math.min(540, ground + 10); row += 1) {
+      if (this.terrain[row * 960 + adjColumn]) {
+        ground = Math.min(ground, row);
         break;
       }
     }
-    for (const block of this.blocks) {
-      if (x >= block.x && x <= block.x + block.width && block.y >= startY) ground = Math.min(ground, block.y);
-    }
-    return ground;
   }
+  return ground;
+}
 
   get localWorm() {
     return this.networkRole === "guest" ? this.enemy : this.player;
@@ -472,86 +506,145 @@ export class WormsGame {
     }
   }
 
-  updateWorm(worm, dt, input = 0) {
-    worm.cooldown = Math.max(0, worm.cooldown - dt);
-    worm.invulnerable = Math.max(0, worm.invulnerable - dt);
-    worm.hurtTime = Math.max(0, (worm.hurtTime ?? 0) - dt);
-    worm.vx += input * 580 * dt;
-    worm.vx *= Math.pow(worm.grounded ? 0.001 : 0.12, dt);
-    worm.vx = clamp(worm.vx, -145, 145);
-    worm.vy += 720 * dt;
-    if (worm.rope) {
-      const dx = worm.x - worm.rope.x;
-      const dy = worm.y - worm.rope.y;
-      const d = Math.hypot(dx, dy);
-      if (d > worm.rope.length) {
-        const excess = d - worm.rope.length;
-        worm.vx -= dx / d * excess * 24;
-        worm.vy -= dy / d * excess * 24;
-      }
-    }
-    const oldX = worm.x;
-    const candidateX = clamp(worm.x + worm.vx * dt, worm.radius, 960 - worm.radius);
-    if (this.circleHitsSolid(candidateX, worm.y, worm.radius)) {
-      let stepped = false;
-      if (worm.grounded) {
-        for (let step = 1; step <= 10; step += 1) {
-          if (!this.circleHitsSolid(candidateX, worm.y - step, worm.radius)) {
-            worm.x = candidateX;
-            worm.y -= step;
-            stepped = true;
-            break;
-          }
-        }
-      }
-      if (!stepped) {
-        worm.vx = 0;
-        worm.x = oldX;
-      }
-    } else {
-      worm.x = candidateX;
-    }
-    const oldY = worm.y;
-    const candidateY = worm.y + worm.vy * dt;
-    const direction = Math.sign(candidateY - oldY);
-    let safeY = oldY;
-    let verticalCollision = false;
-    if (direction) {
-      for (let nextY = oldY + direction; direction > 0 ? nextY <= candidateY : nextY >= candidateY; nextY += direction) {
-        if (this.circleHitsSolid(worm.x, nextY, worm.radius)) {
-          verticalCollision = true;
-          break;
-        }
-        safeY = nextY;
-      }
-    }
-    if (verticalCollision) {
-      const impact = worm.vy;
-      worm.y = safeY;
-      worm.vy = 0;
-      worm.grounded = direction > 0;
-      if (direction > 0 && impact > 520) this.damage(worm, Math.round((impact - 500) / 13));
-    } else {
-      worm.y = candidateY;
-      worm.grounded = this.circleHitsSolid(worm.x, worm.y + 3, worm.radius);
-    }
-    if (worm.y + worm.radius >= 515) {
-      worm.lavaExposure = (worm.lavaExposure ?? 0) + dt;
-      while (worm.lavaExposure >= 1) {
-        worm.lavaExposure -= 1;
-        worm.hp = Math.max(0, worm.hp - 1);
-        worm.hurtTime = 0.45;
-        worm.hurtTilt = (Math.random() - 0.5) * 0.7;
-        if (worm.hp <= 0) this.finish(worm === this.enemy);
-      }
-    } else {
-      worm.lavaExposure = 0;
-    }
-    if (worm.y > 560) {
-      worm.hp = 0;
-      this.finish(worm === this.enemy);
+updateWorm(worm, dt, input = 0) {
+  worm.cooldown = Math.max(0, worm.cooldown - dt);
+  worm.invulnerable = Math.max(0, worm.invulnerable - dt);
+  worm.hurtTime = Math.max(0, (worm.hurtTime ?? 0) - dt);
+  worm.vx += input * 580 * dt;
+  worm.vx *= Math.pow(worm.grounded ? 0.001 : 0.12, dt);
+  worm.vx = clamp(worm.vx, -145, 145);
+  worm.vy += 720 * dt;
+  if (worm.rope) {
+    const dx = worm.x - worm.rope.x;
+    const dy = worm.y - worm.rope.y;
+    const d = Math.hypot(dx, dy);
+    if (d > worm.rope.length) {
+      const excess = d - worm.rope.length;
+      worm.vx -= dx / d * excess * 24;
+      worm.vy -= dy / d * excess * 24;
     }
   }
+  
+  // Горизонтальное движение с улучшенной проверкой
+  const oldX = worm.x;
+  const candidateX = clamp(worm.x + worm.vx * dt, worm.radius, 960 - worm.radius);
+  if (this.circleHitsSolid(candidateX, worm.y, worm.radius)) {
+    let stepped = false;
+    if (worm.grounded) {
+      for (let step = 1; step <= 12; step += 1) {
+        if (!this.circleHitsSolid(candidateX, worm.y - step, worm.radius)) {
+          worm.x = candidateX;
+          worm.y -= step;
+          stepped = true;
+          break;
+        }
+      }
+    }
+    if (!stepped) {
+      // Пробуем в другую сторону
+      for (let step = 1; step <= 4; step += 1) {
+        if (!this.circleHitsSolid(candidateX, worm.y + step, worm.radius)) {
+          worm.x = candidateX;
+          worm.y += step;
+          stepped = true;
+          break;
+        }
+      }
+    }
+    if (!stepped) {
+      worm.vx = 0;
+      worm.x = oldX;
+    }
+  } else {
+    worm.x = candidateX;
+  }
+  
+  // Вертикальное движение с улучшенной проверкой
+  const oldY = worm.y;
+  const candidateY = worm.y + worm.vy * dt;
+  const direction = Math.sign(candidateY - oldY);
+  let safeY = oldY;
+  let verticalCollision = false;
+  
+  if (direction) {
+    // Используем более мелкие шаги для точной проверки
+    const stepSize = direction > 0 ? 1 : -1;
+    let currentY = oldY;
+    // Проверяем с шагом 1 пиксель для точности
+    const maxSteps = Math.abs(Math.round(candidateY - oldY)) + 5;
+    for (let step = 0; step < maxSteps; step += 1) {
+      const nextY = currentY + stepSize;
+      // Проверяем не только центр, но и нижнюю/верхнюю часть червячка
+      let hit = false;
+      for (let offset = -worm.radius * 0.6; offset <= worm.radius * 0.6; offset += worm.radius * 0.3) {
+        const checkX = worm.x + offset;
+        if (this.circleHitsSolid(checkX, nextY, worm.radius * 0.8)) {
+          hit = true;
+          break;
+        }
+      }
+      if (hit) {
+        verticalCollision = true;
+        safeY = currentY;
+        break;
+      }
+      currentY = nextY;
+      safeY = nextY;
+      if (Math.abs(currentY - oldY) >= Math.abs(candidateY - oldY)) break;
+    }
+  }
+  
+  if (verticalCollision) {
+    const impact = worm.vy;
+    worm.y = safeY;
+    worm.vy = 0;
+    worm.grounded = direction > 0;
+    if (direction > 0 && impact > 520) this.damage(worm, Math.round((impact - 500) / 13));
+  } else {
+    worm.y = candidateY;
+    // Проверяем grounded более тщательно
+    worm.grounded = false;
+    for (let offset = -worm.radius * 0.6; offset <= worm.radius * 0.6; offset += worm.radius * 0.3) {
+      const checkX = worm.x + offset;
+      const checkY = worm.y + worm.radius * 0.9;
+      if (this.isTerrainSolid(Math.round(checkX), Math.round(checkY)) || 
+          this.isBlockSolid(checkX, checkY)) {
+        worm.grounded = true;
+        break;
+      }
+    }
+    // Если червячок касается земли снизу, но не стоит на ней
+    if (!worm.grounded && worm.vy >= 0) {
+      const belowY = worm.y + worm.radius + 2;
+      for (let offset = -worm.radius * 0.5; offset <= worm.radius * 0.5; offset += worm.radius * 0.3) {
+        const checkX = worm.x + offset;
+        if (this.isTerrainSolid(Math.round(checkX), Math.round(belowY)) || 
+            this.isBlockSolid(checkX, belowY)) {
+          worm.grounded = true;
+          break;
+        }
+      }
+    }
+  }
+  
+  // Обработка лавы и падения
+  if (worm.y + worm.radius >= 515) {
+    worm.lavaExposure = (worm.lavaExposure ?? 0) + dt;
+    while (worm.lavaExposure >= 1) {
+      worm.lavaExposure -= 1;
+      worm.hp = Math.max(0, worm.hp - 1);
+      worm.hurtTime = 0.45;
+      worm.hurtTilt = (Math.random() - 0.5) * 0.7;
+      if (worm.hp <= 0) this.finish(worm === this.enemy);
+    }
+  } else {
+    worm.lavaExposure = 0;
+  }
+  if (worm.y > 560) {
+    worm.hp = 0;
+    this.finish(worm === this.enemy);
+  }
+}
 
   updateProjectiles(dt) {
     this.projectiles = this.projectiles.filter((projectile) => {
