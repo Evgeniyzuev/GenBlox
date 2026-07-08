@@ -259,7 +259,8 @@ export class WaveRunnersGame {
       addRoad(chunkStart + this.chunkLength / 2, this.chunkLength);
     }
 
-    if (index > 1 && Math.random() < 0.45) this.spawnTrophy(index, trench);
+    const trophyChance = clamp(0.5 - index * 0.006, 0.18, 0.5);
+    if (index > 1 && Math.random() < trophyChance) this.spawnTrophy(index, trench);
     this.trackGroup.add(group);
     this.chunks.set(index, group);
   }

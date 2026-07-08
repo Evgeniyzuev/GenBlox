@@ -398,12 +398,31 @@ export class MicroMachinesGame {
     if (this.keys.has("d") || this.keys.has("arrowright")) steer += 1;
     for (const pointer of this.pointers.values()) {
       if (pointer.side !== "drive") continue;
-      steer += clamp((pointer.x - pointer.startX) / 65, -1, 1);
-      const drive = clamp((pointer.startY - pointer.y) / 65, -1, 1);
-      if (drive >= 0) throttle += drive;
-      else {
-        brake = Math.max(brake, -drive);
-        reverse = Math.max(reverse, -drive);
+      const dx = pointer.x - pointer.startX;
+      const dy = pointer.y - pointer.startY;
+      const pull = Math.hypot(dx, dy);
+      if (pull < 14) continue;
+      const local = this.racers?.[this.localSlot];
+      const desired = Math.atan2(dy, dx);
+      const strength = clamp((pull - 14) / 86, 0, 1);
+      if (!local) {
+        steer += clamp(dx / 72, -1, 1);
+        if (dy < 0) throttle += strength;
+        else {
+          brake = Math.max(brake, strength);
+          reverse = Math.max(reverse, strength);
+        }
+        continue;
+      }
+      const turn = angleDiff(local.angle, desired);
+      const forwardIntent = Math.cos(turn);
+      steer += clamp(turn * 1.65, -1, 1) * strength;
+      if (forwardIntent >= -0.25) {
+        throttle += strength * clamp((forwardIntent + 0.25) / 1.25, 0.28, 1);
+        if (forwardIntent < 0.18) brake = Math.max(brake, strength * 0.45);
+      } else {
+        brake = Math.max(brake, strength);
+        reverse = Math.max(reverse, strength * clamp((-forwardIntent - 0.25) / 0.75, 0, 1));
       }
     }
     this.localInput.throttle = clamp(throttle, 0, 1);
