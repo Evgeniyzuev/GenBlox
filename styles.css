@@ -760,6 +760,63 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   opacity: 0;
   transition: opacity .08s linear;
 }
+.wave-touch {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 9;
+  display: none;
+  justify-content: space-between;
+  align-items: end;
+  padding: 0 max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  pointer-events: none;
+}
+.wave-stick {
+  position: relative;
+  width: 118px;
+  aspect-ratio: 1;
+  border: 2px solid rgba(255,255,255,.24);
+  border-radius: 50%;
+  background: rgba(15,18,36,.42);
+  box-shadow: inset 0 0 28px rgba(255,255,255,.08);
+  pointer-events: auto;
+  touch-action: none;
+}
+.wave-stick span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 48px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: rgba(248,247,255,.42);
+  box-shadow: 0 8px 18px rgba(0,0,0,.25);
+  transform: translate(-50%, -50%);
+}
+.wave-touch-buttons {
+  display: grid;
+  grid-template-columns: 72px 72px;
+  gap: 12px;
+  pointer-events: auto;
+}
+.wave-touch-button {
+  width: 72px;
+  aspect-ratio: 1;
+  border: 2px solid rgba(255,255,255,.22);
+  border-radius: 50%;
+  color: #171525;
+  background: var(--cyan);
+  box-shadow: 0 8px 20px rgba(0,0,0,.28);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+  touch-action: none;
+}
+.wave-touch-button.is-action {
+  background: var(--lime);
+}
+.wave-touch-button:active {
+  transform: translateY(2px) scale(.97);
+}
 
 #game-dialog.is-worms,
 #game-dialog.is-micro,
@@ -858,6 +915,7 @@ footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--mut
   .card-preview { min-height: 220px; }
   .card-copy { padding: 28px; }
   .party-panel { grid-template-columns: 1fr; gap: 8px; }
+  .wave-touch { display: flex; }
 }
 
 @media (max-width: 470px) {
@@ -893,12 +951,12 @@ footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--mut
   .wave-hud { top: 48px; grid-template-columns: repeat(3, minmax(74px, auto)); }
   .wave-hud > div:not(.wave-collect):not(.wave-controls) { min-width: 74px; padding: 6px 9px; }
   .wave-controls { display: none; }
+  .wave-touch { display: flex; }
 }
 
 @media (orientation: portrait) and (max-width: 720px) {
   #game-dialog.is-worms .worms-stage::after,
-  #game-dialog.is-micro .micro-stage::after,
-  #game-dialog.is-wave .wave-stage::after {
+  #game-dialog.is-micro .micro-stage::after {
     position: absolute;
     inset: 0;
     z-index: 8;
