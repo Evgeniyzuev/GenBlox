@@ -164,7 +164,7 @@ export class WaveRunnersGame {
       const key = event.key.toLowerCase();
       this.keys.add(key);
       if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(key)) event.preventDefault();
-      if ((event.code === "Space" || key === "w" || key === "arrowup") && this.player.grounded) this.jump();
+      if (event.code === "Space" && this.player.grounded) this.jump();
     };
     this.onKeyUp = (event) => this.keys.delete(event.key.toLowerCase());
     this.onResize = () => this.resize();

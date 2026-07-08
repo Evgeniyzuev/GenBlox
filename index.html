@@ -162,6 +162,28 @@
               <small class="card-hint">Rooms support up to four human racers; bots fill the empty slots.</small>
             </div>
           </article>
+
+          <article class="space-card wave-card">
+            <div class="card-preview wave-preview" aria-hidden="true">
+              <div class="wave-preview-road">
+                <span class="wave-preview-runner"></span>
+                <i class="wave-preview-trench"></i>
+                <b class="wave-preview-gem"></b>
+                <em class="wave-preview-pulse"></em>
+              </div>
+            </div>
+            <div class="card-copy">
+              <p class="eyebrow">SPACE 005</p>
+              <h2>Wave Runners</h2>
+              <p>A Three.js low-poly runner about blocky heroes, trenches, color-coded danger waves, and risky trophy harvesting.</p>
+              <div class="card-actions">
+                <button class="secondary-button play-solo" data-game="wave-runners" type="button">
+                  Run Solo
+                </button>
+              </div>
+              <small class="card-hint">Green, yellow, and red waves get faster as your distance and trophy value climb.</small>
+            </div>
+          </article>
         </div>
       </section>
     </main>
@@ -267,6 +289,11 @@
         <section id="micro-game-view" hidden>
           <p class="game-status micro-status" id="micro-status" aria-live="polite">Choose one of three tracks</p>
           <div class="micro-stage" id="micro-stage"></div>
+        </section>
+
+        <section id="wave-game-view" hidden>
+          <p class="game-status wave-status" id="wave-status" aria-live="polite">Run, loot, and hide from waves</p>
+          <div class="wave-stage" id="wave-stage"></div>
         </section>
       </div>
     </dialog>
