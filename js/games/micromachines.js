@@ -367,7 +367,8 @@ export class MicroMachinesGame {
     if (this.state !== "racing") return;
     this.canvas.setPointerCapture(event.pointerId);
     const point = this.pointerPosition(event);
-    const side = point.x < 560 ? "drive" : "fire";
+    let side = "drive";
+    if (point.x >= 720) side = point.y > 430 ? "brake" : "fire";
     this.pointers.set(event.pointerId, { ...point, startX: point.x, startY: point.y, side });
     if (side === "fire") this.fire();
   }
@@ -397,6 +398,11 @@ export class MicroMachinesGame {
     if (this.keys.has("a") || this.keys.has("arrowleft")) steer -= 1;
     if (this.keys.has("d") || this.keys.has("arrowright")) steer += 1;
     for (const pointer of this.pointers.values()) {
+      if (pointer.side === "brake") {
+        brake = 1;
+        reverse = 1;
+        continue;
+      }
       if (pointer.side !== "drive") continue;
       const dx = pointer.x - pointer.startX;
       const dy = pointer.y - pointer.startY;
@@ -407,23 +413,12 @@ export class MicroMachinesGame {
       const strength = clamp((pull - 14) / 86, 0, 1);
       if (!local) {
         steer += clamp(dx / 72, -1, 1);
-        if (dy < 0) throttle += strength;
-        else {
-          brake = Math.max(brake, strength);
-          reverse = Math.max(reverse, strength);
-        }
+        throttle = Math.max(throttle, 1);
         continue;
       }
       const turn = angleDiff(local.angle, desired);
-      const forwardIntent = Math.cos(turn);
       steer += clamp(turn * 1.65, -1, 1) * strength;
-      if (forwardIntent >= -0.25) {
-        throttle += strength * clamp((forwardIntent + 0.25) / 1.25, 0.28, 1);
-        if (forwardIntent < 0.18) brake = Math.max(brake, strength * 0.45);
-      } else {
-        brake = Math.max(brake, strength);
-        reverse = Math.max(reverse, strength * clamp((-forwardIntent - 0.25) / 0.75, 0, 1));
-      }
+      throttle = Math.max(throttle, 1);
     }
     this.localInput.throttle = clamp(throttle, 0, 1);
     this.localInput.steer = clamp(steer, -1, 1);
@@ -1396,12 +1391,17 @@ export class MicroMachinesGame {
     context.fill();
     context.fillStyle = "rgba(255,102,140,.72)";
     context.beginPath();
-    context.arc(850, 430, 43, 0, TAU);
+    context.arc(850, 382, 42, 0, TAU);
+    context.fill();
+    context.fillStyle = "rgba(99,220,255,.72)";
+    context.beginPath();
+    context.arc(850, 482, 42, 0, TAU);
     context.fill();
     context.fillStyle = "#fff";
     context.font = "900 13px Rubik, sans-serif";
     context.textAlign = "center";
-    context.fillText("FIRE", 850, 435);
+    context.fillText("FIRE", 850, 387);
+    context.fillText("BRAKE", 850, 487);
     context.globalAlpha = 1;
   }
 
