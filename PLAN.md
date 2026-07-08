@@ -5,6 +5,9 @@
 GenBlox — каталог небольших браузерных игр («спейсов»), в которые можно играть
 одному или вместе с участниками одной комнаты.
 
+All public-facing website copy, interface text, game names, game rules, status
+messages, HUD labels, and errors must be written in English.
+
 Комната не принадлежит конкретной карточке игры. Пользователь сначала создаёт
 или находит комнату, после чего вся группа свободно выбирает игры из общего
 каталога.

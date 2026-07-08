@@ -347,6 +347,59 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   transform: rotate(7deg);
 }
 
+.micro-preview {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(145deg, #2f6245, #171525);
+}
+.micro-track-preview {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.micro-road {
+  position: absolute;
+  inset: 36px 42px;
+  border: 42px solid #8f8372;
+  border-radius: 42% 58% 46% 54%;
+  box-shadow: inset 0 0 0 5px rgba(255,255,255,.2), 0 0 0 16px rgba(0,0,0,.2);
+  transform: rotate(-8deg);
+}
+.micro-car {
+  position: absolute;
+  z-index: 2;
+  width: 42px;
+  height: 24px;
+  border: 4px solid #171525;
+  background: var(--pink);
+  box-shadow: 5px 5px rgba(0,0,0,.24);
+}
+.micro-car::after {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 11px;
+  height: 8px;
+  content: "";
+  background: white;
+}
+.micro-car.one { top: 36%; left: 31%; transform: rotate(18deg); }
+.micro-car.two { right: 27%; bottom: 31%; background: var(--cyan); transform: rotate(-20deg); }
+.micro-pickup {
+  position: absolute;
+  z-index: 2;
+  top: 29%;
+  right: 31%;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: #171525;
+  background: var(--lime);
+  box-shadow: 4px 4px #171525;
+  transform: rotate(12deg);
+}
+
 .worms-stage {
   position: relative;
   width: 100%;
@@ -482,7 +535,73 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   transform: translateX(-50%);
 }
 
-#game-dialog.is-worms {
+.micro-stage {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #171525;
+  touch-action: none;
+}
+.micro-stage[hidden] { display: none; }
+.micro-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  background: #171525;
+  touch-action: none;
+  user-select: none;
+}
+.micro-map-choice {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-content: center;
+  gap: 14px;
+  padding: clamp(16px, 4vw, 48px);
+  background: linear-gradient(145deg, rgba(21,20,37,.92), rgba(42,40,68,.94));
+}
+.micro-map-choice[hidden] { display: none; }
+.micro-map-heading { grid-column: 1 / -1; display: grid; gap: 5px; text-align: center; }
+.micro-map-heading small { color: var(--lime); font-size: 10px; font-weight: 900; letter-spacing: 2px; }
+.micro-map-heading strong { font-size: clamp(20px, 4vw, 38px); }
+.micro-map-button {
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  gap: 5px;
+  min-height: 150px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  color: var(--ink);
+  background: var(--panel-2);
+  cursor: pointer;
+  text-align: left;
+}
+.micro-map-button span,
+.micro-map-preview {
+  min-height: 70px;
+  border-radius: 9px;
+  background:
+    radial-gradient(circle at 75% 30%, rgba(183,243,74,.72) 0 5%, transparent 6%),
+    radial-gradient(circle at 26% 66%, rgba(255,102,140,.7) 0 5%, transparent 6%),
+    linear-gradient(135deg, transparent 0 28%, #8f8372 29% 43%, transparent 44% 56%, #8f8372 57% 72%, transparent 73%);
+}
+.micro-map-preview {
+  width: 100%;
+  height: 86px;
+  object-fit: cover;
+  border: 1px solid rgba(255,255,255,.12);
+}
+.micro-map-button strong { font-size: clamp(13px, 2vw, 18px); }
+.micro-map-button small { color: var(--muted); font-size: 9px; }
+.micro-map-button:hover, .micro-map-button:focus-visible { border-color: var(--lime); transform: translateY(-2px); }
+
+#game-dialog.is-worms,
+#game-dialog.is-micro {
   width: 100vw;
   height: 100dvh;
   max-width: none;
@@ -492,18 +611,21 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   border: 0;
   background: #171525;
 }
-#game-dialog.is-worms:fullscreen {
+#game-dialog.is-worms:fullscreen,
+#game-dialog.is-micro:fullscreen {
   width: 100vw;
   height: 100dvh;
 }
-#game-dialog.is-worms .game-shell {
+#game-dialog.is-worms .game-shell,
+#game-dialog.is-micro .game-shell {
   position: relative;
   display: block;
   width: 100%;
   height: 100dvh;
   padding: 0;
 }
-#game-dialog.is-worms .game-header {
+#game-dialog.is-worms .game-header,
+#game-dialog.is-micro .game-header {
   position: absolute;
   z-index: 10;
   top: 0;
@@ -514,18 +636,24 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   pointer-events: none;
   background: linear-gradient(rgba(10,14,31,.82), rgba(10,14,31,.25) 70%, transparent);
 }
-#game-dialog.is-worms .game-header-actions { pointer-events: auto; }
-#game-dialog.is-worms .game-header h2 { font-size: clamp(18px, 3vw, 30px); }
-#game-dialog.is-worms .game-header .eyebrow { margin-bottom: 3px; }
-#worms-game-view {
+#game-dialog.is-worms .game-header-actions,
+#game-dialog.is-micro .game-header-actions { pointer-events: auto; }
+#game-dialog.is-worms .game-header h2,
+#game-dialog.is-micro .game-header h2 { font-size: clamp(18px, 3vw, 30px); }
+#game-dialog.is-worms .game-header .eyebrow,
+#game-dialog.is-micro .game-header .eyebrow { margin-bottom: 3px; }
+#worms-game-view,
+#micro-game-view {
   position: absolute;
   inset: 0;
   min-height: 0;
 }
-#game-dialog.is-worms #worms-game-view {
+#game-dialog.is-worms #worms-game-view,
+#game-dialog.is-micro #micro-game-view {
   display: block;
 }
-#game-dialog.is-worms .worms-status {
+#game-dialog.is-worms .worms-status,
+#game-dialog.is-micro .micro-status {
   position: absolute;
   z-index: 9;
   top: max(18px, env(safe-area-inset-top));
@@ -542,6 +670,8 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
 }
 #game-dialog.is-worms .worms-stage { position: absolute; inset: 0; display: block; }
 #game-dialog.is-worms .worms-canvas { width: 100%; height: 100%; }
+#game-dialog.is-micro .micro-stage { position: absolute; inset: 0; display: block; }
+#game-dialog.is-micro .micro-canvas { width: 100%; height: 100%; }
 .help-content { color: var(--muted); line-height: 1.65; }
 .help-content h3 { margin: 24px 0 8px; color: var(--ink); }
 .help-content ul { padding-left: 20px; }
@@ -569,26 +699,33 @@ footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--mut
 }
 
 @media (max-height: 520px) and (orientation: landscape) {
-  #game-dialog.is-worms .game-header h2 { font-size: 17px; }
+  #game-dialog.is-worms .game-header h2,
+  #game-dialog.is-micro .game-header h2 { font-size: 17px; }
   #game-dialog.is-worms .game-header .eyebrow,
-  #game-dialog.is-worms .worms-status { display: none; }
-  #game-dialog.is-worms .icon-button { width: 34px; height: 34px; font-size: 19px; }
+  #game-dialog.is-worms .worms-status,
+  #game-dialog.is-micro .game-header .eyebrow,
+  #game-dialog.is-micro .micro-status { display: none; }
+  #game-dialog.is-worms .icon-button,
+  #game-dialog.is-micro .icon-button { width: 34px; height: 34px; font-size: 19px; }
   .worms-toolbar { top: 48px; width: min(570px, calc(100% - 330px)); }
   .worms-toolbar button { min-height: 42px; }
   .worms-toolbar span { display: none; }
   .worms-map-choice { padding: 12px 26px; }
   .worms-map-button { min-height: 112px; }
+  .micro-map-choice { padding: 12px 26px; }
+  .micro-map-button { min-height: 112px; }
 }
 
 @media (orientation: portrait) and (max-width: 720px) {
-  #game-dialog.is-worms .worms-stage::after {
+  #game-dialog.is-worms .worms-stage::after,
+  #game-dialog.is-micro .micro-stage::after {
     position: absolute;
     inset: 0;
     z-index: 8;
     display: grid;
     place-items: center;
     padding: 32px;
-    content: "↻  Поверни телефон горизонтально";
+    content: "↻  Rotate your phone horizontally";
     color: var(--lime);
     background: rgba(21,20,37,.95);
     font-size: 20px;

@@ -8,7 +8,7 @@ export class PlayroomClient {
   #disconnectListeners = new Set();
 
   constructor(api = window.Playroom) {
-    if (!api) throw new Error("PlayroomKit не загрузился. Проверьте подключение к интернету.");
+    if (!api) throw new Error("PlayroomKit did not load. Check your internet connection.");
     this.#api = api;
   }
 
@@ -17,7 +17,7 @@ export class PlayroomClient {
 
     await this.#api.insertCoin({
       gameId: "genblox-tic-tac-toe",
-      maxPlayersPerRoom: 2,
+      maxPlayersPerRoom: 4,
       matchmaking,
       roomCode,
       skipLobby: true,
@@ -37,12 +37,18 @@ export class PlayroomClient {
   }
 
   get isHost() { return this.#api.isHost(); }
-  get mark() { return this.isHost ? "X" : "O"; }
+  get mark() { return this.playerIndex === 0 ? "X" : this.playerIndex === 1 ? "O" : null; }
+  get maxPlayers() { return 4; }
   get playerCount() { return Math.max(1, this.#players.size); }
   get roomCode() { return this.#api.getRoomCode?.() ?? "—"; }
   get started() { return this.#started; }
   get localPlayer() { return this.#api.myPlayer?.() ?? null; }
+  get playerId() { return this.localPlayer?.id ?? null; }
   get players() { return [...this.#players.values()]; }
+  get playerIndex() {
+    const localId = this.playerId;
+    return this.players.findIndex((player) => player.id === localId);
+  }
   get remotePlayers() {
     const localId = this.localPlayer?.id;
     return this.players.filter((player) => player.id !== localId);
@@ -62,5 +68,11 @@ export class PlayroomClient {
   }
   getRemotePlayerState(key) {
     return this.remotePlayers[0]?.getState?.(key) ?? null;
+  }
+  getAllPlayerStates(key) {
+    return this.players.map((player) => ({
+      playerId: player.id,
+      value: player.getState?.(key) ?? null,
+    }));
   }
 }

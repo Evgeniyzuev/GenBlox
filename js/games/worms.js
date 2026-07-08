@@ -3,21 +3,21 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
 const WEAPONS = [
-  { id: "pistol", icon: "⌁", label: "Пистолет", ammo: 8 },
-  { id: "rocket", icon: "➤", label: "Базука", ammo: 2 },
-  { id: "grenade", icon: "●", label: "Граната", ammo: 2 },
-  { id: "molotov", icon: "♨", label: "Молотов", ammo: 1 },
-  { id: "bat", icon: "╱", label: "Бита", ammo: 3 },
-  { id: "finger", icon: "☝", label: "Палец", ammo: Infinity },
-  { id: "dig", icon: "⛏", label: "Кирка", ammo: 8 },
-  { id: "block", icon: "■", label: "Блок", ammo: 6 },
-  { id: "rope", icon: "⌇", label: "Верёвка", ammo: 5 },
+  { id: "pistol", icon: "⌁", label: "Pistol", ammo: 8 },
+  { id: "rocket", icon: "➤", label: "Bazooka", ammo: 2 },
+  { id: "grenade", icon: "●", label: "Grenade", ammo: 2 },
+  { id: "molotov", icon: "♨", label: "Molotov", ammo: 1 },
+  { id: "bat", icon: "╱", label: "Bat", ammo: 3 },
+  { id: "finger", icon: "☝", label: "Finger", ammo: Infinity },
+  { id: "dig", icon: "⛏", label: "Pickaxe", ammo: 8 },
+  { id: "block", icon: "■", label: "Block", ammo: 6 },
+  { id: "rope", icon: "⌇", label: "Rope", ammo: 5 },
 ];
 
 const MAPS = [
-  { id: "canyon", title: "Каньон", subtitle: "Высоты и опасная расселина", colors: ["#f1ad5f", "#9a4c42"] },
-  { id: "anthill", title: "Муравейник", subtitle: "Холмы и тесные позиции", colors: ["#8dcf6f", "#3d774d"] },
-  { id: "islands", title: "Архипелаг", subtitle: "Прыжки, верёвка и пропасти", colors: ["#74d1cf", "#317290"] },
+  { id: "canyon", title: "Canyon", subtitle: "Heights and a dangerous rift", colors: ["#f1ad5f", "#9a4c42"] },
+  { id: "anthill", title: "Anthill", subtitle: "Hills and tight positions", colors: ["#8dcf6f", "#3d774d"] },
+  { id: "islands", title: "Archipelago", subtitle: "Jumps, rope, and gaps", colors: ["#74d1cf", "#317290"] },
 ];
 
 function roundedRect(context, x, y, width, height, radius) {
@@ -35,7 +35,7 @@ export class WormsGame {
     this.canvas.className = "worms-canvas";
     this.canvas.width = 960;
     this.canvas.height = 540;
-    this.canvas.setAttribute("aria-label", "Поле игры «Червячки»");
+    this.canvas.setAttribute("aria-label", "Worms game field");
     this.canvas.setAttribute("role", "application");
     this.context = this.canvas.getContext("2d");
     this.toolbar = document.createElement("div");
@@ -68,7 +68,7 @@ export class WormsGame {
   buildMapChoice() {
     const heading = document.createElement("div");
     heading.className = "worms-map-heading";
-    heading.innerHTML = "<small>ВЫБЕРИ АРЕНУ</small><strong>Три карты. Один шанс.</strong>";
+    heading.innerHTML = "<small>CHOOSE ARENA</small><strong>Three maps. One chance.</strong>";
     this.mapChoice.append(heading);
     MAPS.forEach((map) => {
       const button = document.createElement("button");
@@ -82,7 +82,7 @@ export class WormsGame {
       this.mapChoice.append(button);
     });
     if (this.networkRole === "guest") {
-      heading.innerHTML = "<small>СЕТЕВАЯ ДУЭЛЬ</small><strong>Хозяин выбирает карту…</strong>";
+      heading.innerHTML = "<small>NETWORK DUEL</small><strong>The host is choosing a map...</strong>";
     }
   }
 
@@ -133,22 +133,22 @@ export class WormsGame {
     this.crates = [];
     this.terrainEvents = [];
     this.appliedTerrainEvents = 0;
-    this.message = "БОЙ!";
+    this.message = "FIGHT!";
     this.messageTime = 1.2;
     this.terrain = this.createTerrain(mapId);
-    this.player = this.createWorm(130, "#ff668c", "Ты");
-    this.enemy = this.createWorm(830, "#63dcff", "Бот");
+    this.player = this.createWorm(130, "#ff668c", "You");
+    this.enemy = this.createWorm(830, "#63dcff", "Bot");
     this.player.y = this.groundAt(this.player.x) - this.player.radius;
     this.enemy.y = this.groundAt(this.enemy.x) - this.enemy.radius;
     this.updateToolbar();
     const local = this.localWorm;
     if (this.networkRole === "guest") {
-      local.name = "Ты";
-      this.player.name = "Хост";
+      local.name = "You";
+      this.player.name = "Host";
     } else if (this.networkRole === "host") {
-      this.enemy.name = "Соперник";
+      this.enemy.name = "Opponent";
     }
-    this.callbacks.onStatus?.("120 HP · уничтожь червячка соперника");
+    this.callbacks.onStatus?.("120 HP · destroy the opponent worm");
     if (publish && this.networkRole === "host") this.publishSnapshot();
   }
 
@@ -782,7 +782,7 @@ updateWorm(worm, dt, input = 0) {
       const x = 130 + Math.random() * 700;
       this.crates.push({ x, y: -20, vy: 0, type: ["health", "armor", "ammo"][Math.floor(Math.random() * 3)] });
       this.crateClock = 28 + Math.random() * 10;
-      this.message = "ПРИПАСЫ!";
+      this.message = "SUPPLIES!";
       this.messageTime = 1.5;
     }
     this.crates = this.crates.filter((crate) => {
@@ -815,19 +815,19 @@ updateWorm(worm, dt, input = 0) {
   finish(playerWon) {
     if (this.state !== "playing") return;
     this.state = "finished";
-    this.message = playerWon ? "ПОБЕДА!" : "ПОРАЖЕНИЕ";
+    this.message = playerWon ? "VICTORY!" : "DEFEAT";
     this.messageTime = Infinity;
-    this.callbacks.onStatus?.(playerWon ? "Ты победил!" : "Компьютер победил");
+    this.callbacks.onStatus?.(playerWon ? "You won!" : "Computer won");
     const restart = document.createElement("button");
     restart.type = "button";
     restart.className = "worms-restart";
-    restart.textContent = "Выбрать новую карту";
+    restart.textContent = "Choose a new map";
     restart.addEventListener("click", () => {
       restart.remove();
       this.state = "maps";
       this.mapChoice.hidden = false;
       this.toolbar.hidden = true;
-      this.callbacks.onStatus?.("Выбери одну из трёх карт");
+      this.callbacks.onStatus?.("Choose one of three maps");
       if (this.networkRole === "host") {
         this.network.publish?.({ kind: "worms", phase: "selecting", revision: Date.now() });
       }
@@ -908,7 +908,7 @@ updateWorm(worm, dt, input = 0) {
       this.state = "maps";
       this.mapChoice.hidden = false;
       this.toolbar.hidden = true;
-      this.callbacks.onStatus?.("Хозяин комнаты выбирает карту…");
+      this.callbacks.onStatus?.("The room host is choosing a map...");
       return;
     }
     if (!this.player || this.mapId !== snapshot.mapId) this.start(snapshot.mapId, false);
@@ -935,15 +935,15 @@ updateWorm(worm, dt, input = 0) {
     }
     this.appliedTerrainEvents = events.length;
     this.time = (snapshot.tick ?? 0) / 60;
-    this.message = snapshot.message === "ПОБЕДА!"
-      ? "ПОРАЖЕНИЕ"
-      : snapshot.message === "ПОРАЖЕНИЕ"
-        ? "ПОБЕДА!"
+    this.message = snapshot.message === "VICTORY!"
+      ? "DEFEAT"
+      : snapshot.message === "DEFEAT"
+        ? "VICTORY!"
         : snapshot.message ?? "";
     this.messageTime = snapshot.messageTime ?? 0;
     this.state = snapshot.phase === "finished" ? "finished" : "playing";
     if (this.state === "finished") {
-      this.callbacks.onStatus?.(this.message === "ПОБЕДА!" ? "Ты победил!" : "Хозяин комнаты победил");
+      this.callbacks.onStatus?.(this.message === "VICTORY!" ? "You won!" : "The room host won");
     }
     this.updateToolbar();
   }
@@ -1196,7 +1196,7 @@ updateWorm(worm, dt, input = 0) {
       context.fillText(`${worm.name}  ${worm.hp} HP`, x + (align === "left" ? 14 : -14), 43);
       context.fillStyle = "#9478ff";
       context.font = "700 12px Rubik, sans-serif";
-      context.fillText(`БРОНЯ ${worm.armor}`, x + (align === "left" ? 14 : -14), 62);
+      context.fillText(`ARMOR ${worm.armor}`, x + (align === "left" ? 14 : -14), 62);
     };
     drawHealth(this.player, 18, "left");
     drawHealth(this.enemy, 942, "right");
@@ -1255,12 +1255,12 @@ updateWorm(worm, dt, input = 0) {
     context.stroke();
     context.fillStyle = "white";
     context.font = "800 13px Rubik, sans-serif";
-    context.fillText("ОГОНЬ", 890, 335);
+    context.fillText("FIRE", 890, 335);
 
     context.fillStyle = "rgba(255,255,255,.62)";
     context.font = "800 11px Rubik, sans-serif";
-    context.fillText(this.localWorm.rope ? "ДВИЖЕНИЕ / ДЛИНА" : "ДВИЖЕНИЕ", 95, 501);
-    context.fillText("ПРИЦЕЛ", 765, 501);
+    context.fillText(this.localWorm.rope ? "MOVE / LENGTH" : "MOVE", 95, 501);
+    context.fillText("AIM", 765, 501);
     context.globalAlpha = 1;
     if (this.state === "playing") {
       context.strokeStyle = "rgba(255,255,255,.55)";
@@ -1406,7 +1406,7 @@ updateWorm(worm, dt, input = 0) {
       context.fillStyle = "rgba(21,20,37,.75)";
       roundedRect(context, 335, 220, 290, 82, 20);
       context.fill();
-      context.fillStyle = this.message === "ПОРАЖЕНИЕ" ? "#ff668c" : "#b7f34a";
+      context.fillStyle = this.message === "DEFEAT" ? "#ff668c" : "#b7f34a";
       context.textAlign = "center";
       context.font = "900 38px Rubik, sans-serif";
       context.fillText(this.message, 480, 272);

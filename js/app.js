@@ -15,52 +15,82 @@ import {
   playCheckersMove,
 } from "./games/checkers.js";
 import { WormsGame } from "./games/worms.js";
+import { MicroMachinesGame } from "./games/micromachines.js";
+import { WaveRunnersGame } from "./games/wave-runners.js";
 
 const GAMES = {
   "tic-tac-toe": {
-    title: "Крестики-нолики",
-    kicker: "СПЕЙС 001",
+    title: "Tic-Tac-Toe",
+    kicker: "SPACE 001",
     help: `
-      <h3>Цель</h3>
-      <p>Первым составить линию из трёх своих знаков по горизонтали, вертикали или диагонали.</p>
-      <h3>Ход игры</h3>
+      <h3>Goal</h3>
+      <p>Be the first to make a line of three marks horizontally, vertically, or diagonally.</p>
+      <h3>How It Plays</h3>
       <ul>
-        <li>Игроки ходят по очереди в свободную клетку.</li>
-        <li>Первый ход чередуется между партиями.</li>
-        <li>Если поле заполнено без линии из трёх знаков, объявляется ничья.</li>
+        <li>Players take turns placing a mark in an empty cell.</li>
+        <li>The first move alternates between rounds.</li>
+        <li>If the board fills without a three-mark line, the round is a draw.</li>
       </ul>`,
   },
   checkers: {
-    title: "Шашки",
-    kicker: "СПЕЙС 002",
+    title: "Checkers",
+    kicker: "SPACE 002",
     help: `
-      <h3>Цель</h3>
-      <p>Забрать все шашки соперника или лишить его возможности сделать ход.</p>
-      <h3>Русские шашки</h3>
+      <h3>Goal</h3>
+      <p>Capture all opposing pieces or leave the opponent with no legal moves.</p>
+      <h3>Russian Checkers</h3>
       <ul>
-        <li>Простая шашка ходит по диагонали вперёд на одну клетку.</li>
-        <li>Бить можно вперёд и назад. Если взятие возможно, оно обязательно.</li>
-        <li>За один ход нужно продолжать серию взятий той же шашкой.</li>
-        <li>На последней горизонтали шашка становится дамкой.</li>
-        <li>Дамка ходит и бьёт на любое расстояние по диагонали.</li>
+        <li>A regular piece moves one square diagonally forward.</li>
+        <li>Captures can go forward or backward. If a capture is available, it is mandatory.</li>
+        <li>Multi-captures must continue with the same piece.</li>
+        <li>A piece becomes a king on the far row.</li>
+        <li>Kings move and capture any distance diagonally.</li>
       </ul>`,
   },
   worms: {
-    title: "Червячки",
-    kicker: "СПЕЙС 003 · REALTIME",
+    title: "Worms",
+    kicker: "SPACE 003 · REALTIME",
     help: `
-      <h3>Цель</h3>
-      <p>Сними 120 HP синего червячка. Используй рельеф, ограниченный боезапас и падающие припасы.</p>
-      <p>Пули и взмахи биты можно заметить и избежать. Лава наносит 1 HP в секунду, а коктейль Молотова разливает по склону временный огонь.</p>
-      <p>Всё оружие и инструменты ограничены. Только слабый удар пальцем доступен всегда. На верёвке вертикаль левого стика меняет её длину.</p>
-      <h3>На телефоне</h3>
+      <h3>Goal</h3>
+      <p>Take 120 HP from the blue worm. Use terrain, limited ammo, and falling supplies.</p>
+      <p>Bullets and bat swings can be spotted and dodged. Lava deals 1 HP per second, and Molotovs spill temporary fire downhill.</p>
+      <p>All weapons and tools are limited. Only the weak finger poke is always available. While roped, vertical movement on the left stick changes rope length.</p>
+      <h3>On Phone</h3>
       <ul>
-        <li>Левый стик отвечает только за движение, отдельная кнопка — за прыжок.</li>
-        <li>Правый стик задаёт направление, отдельная красная кнопка производит выстрел.</li>
-        <li>Оружие переключается кнопками под ареной.</li>
+        <li>The left stick controls movement only, with a separate jump button.</li>
+        <li>The right stick aims, and the separate red button fires.</li>
+        <li>Switch weapons with the buttons below the arena.</li>
       </ul>
-      <h3>Клавиатура</h3>
-      <p>A/D или стрелки — движение, W — прыжок/укоротить верёвку, S — удлинить, пробел — огонь, 1–9 — выбор инструмента.</p>`,
+      <h3>Keyboard</h3>
+      <p>A/D or arrows - move, W - jump/shorten rope, S - lengthen rope, Space - fire, 1-9 - select tool.</p>`,
+  },
+  micromachines: {
+    title: "Micro Machines",
+    kicker: "SPACE 004 · RACING",
+    help: `
+      <h3>Goal</h3>
+      <p>Be the first racer to complete three laps. Empty room slots are filled by bots up to four racers.</p>
+      <h3>Driving</h3>
+      <ul>
+        <li>Use W/A/S/D or arrows to accelerate, brake, and steer. On touch screens, steer and drive on the left and fire on the right.</li>
+        <li>Cars keep momentum, drift at speed, slide on oil, slow on sand, and can shove rivals into hazards.</li>
+        <li>If you fall from the track or get wrecked, you respawn at your last safe checkpoint after a short delay.</li>
+      </ul>
+      <h3>Items</h3>
+      <p>Pickups can give spikes, oil slicks, rockets, machine guns, shock traps, or boost cans. Each item damages or physically disrupts opponents.</p>`,
+  },
+  "wave-runners": {
+    title: "Wave Runners",
+    kicker: "SPACE 005 · THREE.JS",
+    help: `
+      <h3>Goal</h3>
+      <p>Run as far as possible, grab valuable trophies, and hide in trenches when danger waves sweep the road.</p>
+      <h3>Controls</h3>
+      <ul>
+        <li>Use W/A/S/D or arrows to move. Space, W, or Up jumps.</li>
+        <li>Hold E beside a trophy on the surface to harvest it. Moving, jumping, or dropping into a trench cancels progress.</li>
+        <li>Green waves are slow, yellow waves are faster, and red waves are the most dangerous. Trenches keep you safe.</li>
+      </ul>`,
   },
 };
 
@@ -100,9 +130,15 @@ const elements = {
   closeGame: $("#close-game"),
   board: $("#game-board"),
   wormsStage: $("#worms-stage"),
+  microStage: $("#micro-stage"),
+  waveStage: $("#wave-stage"),
   classicGameView: $("#classic-game-view"),
   wormsGameView: $("#worms-game-view"),
+  microGameView: $("#micro-game-view"),
+  waveGameView: $("#wave-game-view"),
   wormsStatus: $("#worms-status"),
+  microStatus: $("#micro-status"),
+  waveStatus: $("#wave-status"),
   gameStatus: $("#game-status"),
   role: $("#role-label"),
   players: $("#players-label"),
@@ -134,6 +170,35 @@ let syncTimer = null;
 let computerTimer = null;
 let suppressGameReturn = false;
 let wormsGame = null;
+let microGame = null;
+let waveGame = null;
+
+function isRealtimeGame(gameId) {
+  return gameId === "worms" || gameId === "micromachines" || gameId === "wave-runners";
+}
+
+function destroyRealtimeGames() {
+  if (wormsGame) {
+    wormsGame.destroy();
+    wormsGame = null;
+  }
+  if (microGame) {
+    microGame.destroy();
+    microGame = null;
+  }
+  if (waveGame) {
+    waveGame.destroy();
+    waveGame = null;
+  }
+}
+
+function showRealtimeUnavailable(stage, title, message) {
+  stage.replaceChildren();
+  const panel = document.createElement("div");
+  panel.className = "worms-room-unavailable";
+  panel.innerHTML = `<p><strong>${title}</strong>${message}</p>`;
+  stage.append(panel);
+}
 
 function buildBoard(gameId) {
   elements.board.replaceChildren();
@@ -147,7 +212,7 @@ function buildBoard(gameId) {
     cell.type = "button";
     cell.dataset.index = index;
     cell.setAttribute("role", "gridcell");
-    cell.setAttribute("aria-label", `Клетка ${index + 1}`);
+    cell.setAttribute("aria-label", `Cell ${index + 1}`);
     cell.addEventListener("click", () => makeMove(index));
     elements.board.append(cell);
   }
@@ -167,6 +232,7 @@ function closeOverlay(dialog, name) {
 
 function closeGameFromSync() {
   if (!elements.gameDialog.open) return;
+  destroyRealtimeGames();
   if (history.state?.overlay === "game") {
     suppressGameReturn = true;
     history.back();
@@ -204,7 +270,7 @@ function updateUrlRoomCode(code) {
 function renderQr(link) {
   elements.roomQr.replaceChildren();
   if (!window.QRCode) {
-    elements.roomQr.textContent = "QR недоступен";
+    elements.roomQr.textContent = "QR unavailable";
     return;
   }
   new window.QRCode(elements.roomQr, {
@@ -223,15 +289,15 @@ async function connectRoom({ matchmaking = false, roomCode = "", kind }, trigger
 
   const code = normalizeRoomCode(roomCode);
   if (roomCode && code.length < 3) {
-    setRoomStatus("Проверь код комнаты: в нём должно быть не меньше трёх символов.", true);
+    setRoomStatus("Check the room code: it must contain at least three characters.", true);
     elements.roomCodeInput.focus();
     return;
   }
 
   const originalLabel = trigger.textContent;
   connectionButtons.forEach((button) => { button.disabled = true; });
-  trigger.textContent = matchmaking ? "Ищем…" : code ? "Подключаемся…" : "Создаём…";
-  setRoomStatus(matchmaking ? "Ищем свободную открытую комнату…" : "Подключаемся к Playroom…");
+  trigger.textContent = matchmaking ? "Searching..." : code ? "Joining..." : "Creating...";
+  setRoomStatus(matchmaking ? "Searching for an open room..." : "Connecting to Playroom...");
 
   try {
     client ??= new PlayroomClient();
@@ -240,8 +306,8 @@ async function connectRoom({ matchmaking = false, roomCode = "", kind }, trigger
 
     client.onDisconnect((event) => {
       clearInterval(syncTimer);
-      setRoomStatus(`Соединение потеряно: ${event?.reason || "комната закрыта"}.`, true);
-      elements.roomButtonLabel.textContent = "Нет соединения";
+      setRoomStatus(`Connection lost: ${event?.reason || "room closed"}.`, true);
+      elements.roomButtonLabel.textContent = "Disconnected";
       elements.openRoomMenu.classList.remove("is-connected");
       openOverlay(elements.roomDialog, "room");
     });
@@ -253,11 +319,11 @@ async function connectRoom({ matchmaking = false, roomCode = "", kind }, trigger
     mode = "room";
     showConnectedRoom();
     startRoomSync();
-    setRoomStatus("Комната подключена.");
+    setRoomStatus("Room connected.");
   } catch (error) {
     console.error(error);
     const full = error?.message === "ROOM_LIMIT_EXCEEDED";
-    setRoomStatus(full ? "Эта комната уже заполнена." : "Не удалось подключиться. Проверь код и попробуй ещё раз.", true);
+    setRoomStatus(full ? "This room is already full." : "Could not connect. Check the code and try again.", true);
   } finally {
     connectionButtons.forEach((button) => { button.disabled = false; });
     trigger.textContent = originalLabel;
@@ -269,14 +335,14 @@ function showConnectedRoom() {
   const link = inviteUrl(code);
   elements.disconnected.hidden = true;
   elements.connected.hidden = false;
-  elements.roomTitle.textContent = "Текущая комната";
+  elements.roomTitle.textContent = "Current Room";
   elements.roomCodeDisplay.textContent = code;
-  elements.roomKind.textContent = roomKind === "public" ? "Открытая комната" : "Приватная комната";
+  elements.roomKind.textContent = roomKind === "public" ? "Open Room" : "Private Room";
   elements.inviteLink.value = link;
   elements.partyPanel.hidden = false;
-  elements.partyCode.textContent = `Код: ${code}`;
+  elements.partyCode.textContent = `Code: ${code}`;
   elements.openRoomMenu.classList.add("is-connected");
-  elements.roomButtonLabel.textContent = `Комната ${code}`;
+  elements.roomButtonLabel.textContent = `Room ${code}`;
   elements.playSoloButtons.forEach((button) => { button.hidden = true; });
   elements.launchButtons.forEach((button) => {
     button.hidden = false;
@@ -299,7 +365,7 @@ function syncRoom() {
 
   if (room?.screen === "game" && GAMES[room.activeGame]) {
     const expectedCells = room.activeGame === "checkers" ? 64 : 9;
-    const gameChanged = configuredGameId !== room.activeGame || elements.board.children.length !== expectedCells;
+    const gameChanged = configuredGameId !== room.activeGame || (!isRealtimeGame(room.activeGame) && elements.board.children.length !== expectedCells);
     activeGameId = room.activeGame;
     mode = "room";
     if (gameChanged) setupGameShell();
@@ -307,7 +373,15 @@ function syncRoom() {
     openOverlay(elements.gameDialog, "game");
     const game = client.getGameState(activeGameId);
     if (activeGameId === "worms") {
+      if (client.playerIndex > 1) {
+        destroyRealtimeGames();
+        showRealtimeUnavailable(elements.wormsStage, "Spectating", "Worms is a two-player duel. You can watch this match and join the next room game.");
+        elements.wormsStatus.textContent = "Spectating this duel";
+        return;
+      }
       if (!wormsGame) {
+        microGame?.destroy();
+        microGame = null;
         wormsGame = new WormsGame(elements.wormsStage, {
           onStatus: (message) => { elements.wormsStatus.textContent = message; },
           network: {
@@ -321,6 +395,25 @@ function syncRoom() {
       wormsGame.applyNetworkSnapshot(game);
       return;
     }
+    if (activeGameId === "micromachines") {
+      if (!microGame) {
+        wormsGame?.destroy();
+        wormsGame = null;
+        microGame = new MicroMachinesGame(elements.microStage, {
+          onStatus: (message) => { elements.microStatus.textContent = message; },
+          network: {
+            role: client.isHost ? "host" : "guest",
+            playerId: client.playerId,
+            getPlayers: () => client.players.slice(0, client.maxPlayers).map((player) => ({ id: player.id })),
+            publish: (snapshot) => client.setGameState("micromachines", snapshot, false),
+            sendInput: (input) => client.setLocalPlayerState("micromachines:input", input, false),
+            getInputs: () => client.getAllPlayerStates("micromachines:input"),
+          },
+        });
+      }
+      microGame.applyNetworkSnapshot(game);
+      return;
+    }
     if (isValidGameState(game)) renderGame(game, client.playerCount, roomPlayerSide());
   } else if (elements.gameDialog.open && mode === "room") {
     closeGameFromSync();
@@ -329,21 +422,39 @@ function syncRoom() {
 
 function renderParty() {
   if (!client) return;
-  const text = `Игроков: ${Math.min(client.playerCount, 2)} / 2`;
+  const text = `Players: ${Math.min(client.playerCount, client.maxPlayers)} / ${client.maxPlayers}`;
   elements.partyPlayers.textContent = text;
   elements.roomPlayerCount.textContent = text;
 }
 
 function setupRoomLabels() {
+  if (activeGameId === "micromachines") {
+    elements.role.textContent = client.isHost ? "Race host" : "Racer";
+    elements.players.textContent = `Players: ${Math.min(client.playerCount, client.maxPlayers)} / ${client.maxPlayers}`;
+    elements.nameX.textContent = "Humans";
+    elements.nameO.textContent = "Bots fill empty slots";
+    elements.newRound.hidden = true;
+    elements.hint.textContent = "The race uses up to four human players. Empty slots become bots.";
+    return;
+  }
   const side = roomPlayerSide();
+  if (side === null) {
+    elements.role.textContent = "Spectating";
+    elements.players.textContent = `Players: ${Math.min(client.playerCount, 2)} / 2`;
+    elements.nameX.textContent = "Room Host";
+    elements.nameO.textContent = "Second Player";
+    elements.newRound.hidden = true;
+    elements.hint.textContent = "This game is limited to two active players.";
+    return;
+  }
   elements.role.textContent = activeGameId === "checkers"
-    ? `Ты играешь за ${side === CHECKER_COLORS.BLACK ? "чёрных" : "белых"}`
-    : `Ты играешь за ${side === "X" ? "×" : "○"}`;
-  elements.players.textContent = `Игроков: ${Math.min(client.playerCount, 2)} / 2`;
-  elements.nameX.textContent = "Хозяин комнаты";
-  elements.nameO.textContent = "Второй игрок";
+    ? `You play ${side === CHECKER_COLORS.BLACK ? "black" : "white"}`
+    : `You play ${side === "X" ? "×" : "○"}`;
+  elements.players.textContent = `Players: ${Math.min(client.playerCount, 2)} / 2`;
+  elements.nameX.textContent = "Room Host";
+  elements.nameO.textContent = "Second Player";
   elements.newRound.hidden = !client.isHost;
-  elements.hint.textContent = "Кнопка × завершает игру и возвращает всю комнату в каталог.";
+  elements.hint.textContent = "The × button ends the game and returns the whole room to the catalog.";
 }
 
 function setupGameShell() {
@@ -351,23 +462,36 @@ function setupGameShell() {
   configuredGameId = activeGameId;
   elements.gameKicker.textContent = game.kicker;
   elements.gameTitle.textContent = game.title;
-  elements.helpTitle.textContent = `Правила: ${game.title}`;
+  elements.helpTitle.textContent = `Rules: ${game.title}`;
   elements.helpContent.innerHTML = game.help;
   const isWorms = activeGameId === "worms";
-  elements.classicGameView.hidden = isWorms;
+  const isMicro = activeGameId === "micromachines";
+  const isWave = activeGameId === "wave-runners";
+  elements.classicGameView.hidden = isWorms || isMicro || isWave;
   elements.wormsGameView.hidden = !isWorms;
+  elements.microGameView.hidden = !isMicro;
+  elements.waveGameView.hidden = !isWave;
   elements.gameDialog.classList.toggle("is-worms", isWorms);
-  elements.board.setAttribute("aria-label", `Поле игры «${game.title}»`);
+  elements.gameDialog.classList.toggle("is-micro", isMicro);
+  elements.gameDialog.classList.toggle("is-wave", isWave);
+  elements.board.setAttribute("aria-label", `${game.title} board`);
   elements.markX.textContent = activeGameId === "checkers" ? "●" : "×";
   elements.markO.textContent = activeGameId === "checkers" ? "○" : "○";
-  if (!isWorms) {
-    wormsGame?.destroy();
-    wormsGame = null;
+  if (!isRealtimeGame(activeGameId)) {
+    destroyRealtimeGames();
     buildBoard(activeGameId);
   } else if (mode === "room") {
-    elements.wormsStatus.textContent = client.isHost
-      ? "Выбери карту для сетевого матча"
-      : "Хозяин комнаты выбирает карту…";
+    if (isWorms) {
+      elements.wormsStatus.textContent = client.isHost
+        ? "Choose a map for the network match"
+        : "The room host is choosing a map...";
+    } else if (isMicro) {
+      elements.microStatus.textContent = client.isHost
+        ? "Choose a track for the room race"
+        : "The race host is choosing a track...";
+    } else {
+      elements.waveStatus.textContent = "Wave Runners is a solo Three.js challenge.";
+    }
   }
   selectedChecker = null;
   lastRevision = -1;
@@ -375,6 +499,7 @@ function setupGameShell() {
 
 function roomPlayerSide() {
   if (activeGameId === "checkers") {
+    if (client.playerIndex > 1) return null;
     return client.isHost ? CHECKER_COLORS.BLACK : CHECKER_COLORS.WHITE;
   }
   return client.mark;
@@ -395,7 +520,7 @@ function openSoloGame(gameId) {
   mode = "solo";
   if (activeGameId === "worms") {
     setupGameShell();
-    elements.wormsStatus.textContent = "Выбери одну из трёх карт";
+    elements.wormsStatus.textContent = "Choose one of three maps";
     openOverlay(elements.gameDialog, "game");
     wormsGame?.destroy();
     wormsGame = new WormsGame(elements.wormsStage, {
@@ -406,15 +531,41 @@ function openSoloGame(gameId) {
       .catch(() => {});
     return;
   }
+  if (activeGameId === "micromachines") {
+    setupGameShell();
+    elements.microStatus.textContent = "Choose one of three tracks";
+    openOverlay(elements.gameDialog, "game");
+    destroyRealtimeGames();
+    microGame = new MicroMachinesGame(elements.microStage, {
+      onStatus: (message) => { elements.microStatus.textContent = message; },
+    });
+    elements.gameDialog.requestFullscreen?.()
+      .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
+      .catch(() => {});
+    return;
+  }
+  if (activeGameId === "wave-runners") {
+    setupGameShell();
+    elements.waveStatus.textContent = "Run, loot, and hide from color-coded waves";
+    openOverlay(elements.gameDialog, "game");
+    destroyRealtimeGames();
+    waveGame = new WaveRunnersGame(elements.waveStage, {
+      onStatus: (message) => { elements.waveStatus.textContent = message; },
+    });
+    elements.gameDialog.requestFullscreen?.()
+      .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
+      .catch(() => {});
+    return;
+  }
   localGame = createGameForActive(null);
   setupGameShell();
   const humanSide = activeGameId === "checkers" ? CHECKER_COLORS.BLACK : "X";
-  elements.role.textContent = activeGameId === "checkers" ? "Ты играешь за чёрных" : "Ты играешь за ×";
-  elements.players.textContent = "Одиночная игра";
-  elements.nameX.textContent = "Ты";
-  elements.nameO.textContent = "Компьютер";
+  elements.role.textContent = activeGameId === "checkers" ? "You play black" : "You play ×";
+  elements.players.textContent = "Solo game";
+  elements.nameX.textContent = "You";
+  elements.nameO.textContent = "Computer";
   elements.newRound.hidden = false;
-  elements.hint.textContent = "Закрой игру, чтобы вернуться в каталог.";
+  elements.hint.textContent = "Close the game to return to the catalog.";
   lastRevision = -1;
   openOverlay(elements.gameDialog, "game");
   renderGame(localGame, 2, humanSide);
@@ -433,6 +584,27 @@ function launchForRoom(gameId) {
     client.setRoomState({
       screen: "game",
       activeGame: "worms",
+      startedAt: Date.now(),
+      revision,
+    });
+    mode = "room";
+    setupGameShell();
+    openOverlay(elements.gameDialog, "game");
+    elements.gameDialog.requestFullscreen?.()
+      .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
+      .catch(() => {});
+    return;
+  }
+  if (gameId === "micromachines") {
+    client.setGameState("micromachines", {
+      kind: "micromachines",
+      phase: "selecting",
+      revision: Date.now(),
+    });
+    const revision = (client.getRoomState()?.revision ?? 0) + 1;
+    client.setRoomState({
+      screen: "game",
+      activeGame: "micromachines",
       startedAt: Date.now(),
       revision,
     });
@@ -516,7 +688,7 @@ function queueComputerMove() {
   clearTimeout(computerTimer);
   const computerSide = activeGameId === "checkers" ? CHECKER_COLORS.WHITE : "O";
   if (localGame.winner || localGame.turn !== computerSide) return;
-  elements.gameStatus.textContent = "Компьютер думает…";
+  elements.gameStatus.textContent = "Computer is thinking...";
   computerTimer = setTimeout(() => {
     if (activeGameId === "checkers") {
       const move = chooseCheckersMove(localGame, computerSide);
@@ -551,10 +723,10 @@ function renderGame(game, playerCount, myMark) {
   elements.scoreO.textContent = game.scores.O;
   elements.cards.forEach((card) => card.classList.toggle("is-turn", !game.winner && card.dataset.player === game.turn));
 
-  if (playerCount < 2) elements.gameStatus.textContent = "Ждём второго игрока…";
-  else if (game.winner === "draw") elements.gameStatus.textContent = "Ничья!";
-  else if (game.winner) elements.gameStatus.textContent = game.winner === myMark ? "Ты победил!" : "Победил соперник";
-  else elements.gameStatus.textContent = game.turn === myMark ? "Твой ход" : "Ход соперника";
+  if (playerCount < 2) elements.gameStatus.textContent = "Waiting for the second player...";
+  else if (game.winner === "draw") elements.gameStatus.textContent = "Draw!";
+  else if (game.winner) elements.gameStatus.textContent = game.winner === myMark ? "You won!" : "Opponent won";
+  else elements.gameStatus.textContent = game.turn === myMark ? "Your turn" : "Opponent's turn";
 }
 
 function renderCheckers(game, playerCount, mySide) {
@@ -583,27 +755,25 @@ function renderCheckers(game, playerCount, mySide) {
     card.classList.toggle("is-turn", !game.winner && cardSide === game.turn);
   });
 
-  if (playerCount < 2) elements.gameStatus.textContent = "Ждём второго игрока…";
-  else if (game.winner) elements.gameStatus.textContent = game.winner === mySide ? "Ты победил!" : "Победил соперник";
-  else if (game.turn !== mySide) elements.gameStatus.textContent = "Ход соперника";
-  else if (game.forcedFrom !== null) elements.gameStatus.textContent = "Продолжай взятие";
-  else if (legalMoves.some((move) => move.captured !== null)) elements.gameStatus.textContent = "Твой ход — нужно бить";
-  else elements.gameStatus.textContent = "Твой ход";
+  if (playerCount < 2) elements.gameStatus.textContent = "Waiting for the second player...";
+  else if (game.winner) elements.gameStatus.textContent = game.winner === mySide ? "You won!" : "Opponent won";
+  else if (game.turn !== mySide) elements.gameStatus.textContent = "Opponent's turn";
+  else if (game.forcedFrom !== null) elements.gameStatus.textContent = "Continue the capture";
+  else if (legalMoves.some((move) => move.captured !== null)) elements.gameStatus.textContent = "Your turn - capture is mandatory";
+  else elements.gameStatus.textContent = "Your turn";
 }
 
 function requestCloseGame() {
   clearTimeout(computerTimer);
-  if (wormsGame) {
-    wormsGame.destroy();
-    wormsGame = null;
-  }
   if (document.fullscreenElement === elements.gameDialog) document.exitFullscreen?.().catch(() => {});
   if (mode === "room" && client) {
-    if (!confirm("Завершить игру и вернуть всю комнату в каталог?")) return;
+    if (!confirm("End the game and return the whole room to the catalog?")) return;
+    destroyRealtimeGames();
     const revision = (client.getRoomState()?.revision ?? 0) + 1;
     client.setRoomState({ screen: "catalog", activeGame: null, returnedAt: Date.now(), revision });
     closeGameFromSync();
   } else {
+    destroyRealtimeGames();
     closeOverlay(elements.gameDialog, "game");
   }
 }
@@ -624,8 +794,8 @@ function startNewRound() {
 }
 
 function leaveRoom() {
-  const extra = elements.gameDialog.open ? " Активная игра также будет закрыта." : "";
-  if (!confirm(`Выйти из комнаты?${extra}`)) return;
+  const extra = elements.gameDialog.open ? " The active game will also close." : "";
+  if (!confirm(`Leave the room?${extra}`)) return;
   clearInterval(syncTimer);
   const url = new URL(location.href);
   url.hash = "";
@@ -635,10 +805,10 @@ function leaveRoom() {
 async function copyInvite() {
   try {
     await navigator.clipboard.writeText(elements.inviteLink.value);
-    setRoomStatus("Ссылка скопирована.");
+    setRoomStatus("Link copied.");
   } catch {
     elements.inviteLink.select();
-    setRoomStatus("Выделили ссылку — скопируй её вручную.");
+    setRoomStatus("The link is selected. Copy it manually.");
   }
 }
 
@@ -648,10 +818,7 @@ function handlePopState() {
     return;
   }
   if (elements.gameDialog.open) {
-    if (wormsGame) {
-      wormsGame.destroy();
-      wormsGame = null;
-    }
+    destroyRealtimeGames();
     if (document.fullscreenElement === elements.gameDialog) document.exitFullscreen?.().catch(() => {});
     elements.gameDialog.close();
     if (mode === "room" && client && !suppressGameReturn) {
@@ -706,6 +873,6 @@ buildBoard("tic-tac-toe");
 const invitedCode = roomCodeFromUrl();
 if (invitedCode) {
   elements.roomCodeInput.value = invitedCode;
-  setRoomStatus(`Приглашение в комнату ${invitedCode}. Нажми «Войти».`);
+  setRoomStatus(`Invitation to room ${invitedCode}. Press Join.`);
   openOverlay(elements.roomDialog, "room");
 }
