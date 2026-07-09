@@ -23,6 +23,7 @@ const PLAYER_STATES = {
 };
 
 const WAVE_TYPES = [
+  { id: "white", color: 0xf8f7ff, speed: 8.5, interval: 5.8, label: "WHITE", harmless: true },
   {
     id: "green",
     color: 0x5cff77,
@@ -51,8 +52,8 @@ export class WaveRunnersGame {
     this.money = 0;
     this.speedLevel = 0;
     this.collectRateLevel = 0;
-    this.speedUpgradeCost = 120;
-    this.collectUpgradeCost = 80;
+    this.speedUpgradeCost = 90;
+    this.collectUpgradeCost = 70;
     this.wasActionPressed = false;
     this.collecting = null;
     this.deathFlash = 0;
@@ -231,10 +232,6 @@ export class WaveRunnersGame {
     floor.position.set(0, 0.18, 0);
     floor.receiveShadow = true;
     house.add(floor);
-    const backWall = new THREE.Mesh(new THREE.BoxGeometry(22.5, 9.6, 1.05), this.materials.house);
-    backWall.position.set(0, 4.8, -9.3);
-    backWall.castShadow = true;
-    house.add(backWall);
     [-1, 1].forEach((side) => {
       const wall = new THREE.Mesh(new THREE.BoxGeometry(1.05, 9.6, 18.6), this.materials.house);
       wall.position.set(side * 11.25, 4.8, 0);
@@ -557,7 +554,13 @@ export class WaveRunnersGame {
   spawnWave() {
     const difficulty = clamp(this.distance / 650, 0, 1);
     const roll = Math.random();
-    const type = roll < 0.42 - difficulty * 0.12 ? WAVE_TYPES[0] : roll < 0.82 - difficulty * 0.08 ? WAVE_TYPES[1] : WAVE_TYPES[2];
+    const type = roll < 0.14
+      ? WAVE_TYPES[0]
+      : roll < 0.5 - difficulty * 0.12
+        ? WAVE_TYPES[1]
+        : roll < 0.86 - difficulty * 0.08
+          ? WAVE_TYPES[2]
+          : WAVE_TYPES[3];
     const geometry = new THREE.BoxGeometry(42, 2.2, 0.65);
     const material = new THREE.MeshStandardMaterial({
       color: type.color,
@@ -570,8 +573,8 @@ export class WaveRunnersGame {
     mesh.position.set(0, 1.35, this.player.z + 150);
     mesh.castShadow = true;
     this.waveGroup.add(mesh);
-    this.waves.push({ mesh, type, speed: type.speed + difficulty * 7, box: new THREE.Box3() });
-    this.nextWaveIn = Math.max(1.45, type.interval - difficulty * 1.55 + rand(-0.55, 0.55));
+    this.waves.push({ mesh, type, speed: type.speed + (type.harmless ? difficulty * 2.5 : difficulty * 7), box: new THREE.Box3() });
+    this.nextWaveIn = Math.max(1.45, (type.interval - difficulty * 1.55) * rand(0.7, 1.3));
   }
 
   updateInput(dt) {
@@ -595,11 +598,11 @@ export class WaveRunnersGame {
   }
 
   currentMaxSpeed() {
-    return PLAYER_MAX_SPEED + this.speedLevel * 0.65;
+    return PLAYER_MAX_SPEED * (1.12 ** this.speedLevel);
   }
 
   currentCollectRate() {
-    return BASE_COLLECT_RATE + this.collectRateLevel * 28;
+    return Math.round(BASE_COLLECT_RATE * (1.18 ** this.collectRateLevel));
   }
 
   updatePhysics(dt) {
@@ -670,7 +673,7 @@ export class WaveRunnersGame {
     }
     this.money -= this.speedUpgradeCost;
     this.speedLevel += 1;
-    this.speedUpgradeCost = Math.round(this.speedUpgradeCost * 1.7 + 45);
+    this.speedUpgradeCost = Math.round(this.speedUpgradeCost * 1.32 + 20);
     this.refreshMachineLabel("speed", `SPEED $${this.speedUpgradeCost}`, "#63dcff");
     this.callbacks.onStatus?.(`Speed upgraded: ${this.currentMaxSpeed().toFixed(1)}.`);
   }
@@ -682,7 +685,7 @@ export class WaveRunnersGame {
     }
     this.money -= this.collectUpgradeCost;
     this.collectRateLevel += 1;
-    this.collectUpgradeCost = Math.round(this.collectUpgradeCost * 1.75 + 35);
+    this.collectUpgradeCost = Math.round(this.collectUpgradeCost * 1.3 + 18);
     this.refreshMachineLabel("collect", `TAKE $${this.collectUpgradeCost}`, "#b7f34a");
     this.callbacks.onStatus?.(`Harvest upgraded: $${this.currentCollectRate()}/s.`);
   }
@@ -724,7 +727,9 @@ export class WaveRunnersGame {
       wave.mesh.scale.y = 1 + Math.sin(this.time * 12 + wave.mesh.position.z) * 0.06;
       wave.box.setFromObject(wave.mesh);
       if (wave.box.intersectsBox(playerBox)) {
-        if (this.player.z < 12) {
+        if (wave.type.harmless) {
+          this.callbacks.onStatus?.("WHITE wave passed. False alarm.");
+        } else if (this.player.z < 12) {
           this.callbacks.onStatus?.("Safe at home.");
         } else if (this.player.inTrench && this.player.y < 0.05) {
           this.callbacks.onStatus?.(`${wave.type.label} wave passed overhead.`);
