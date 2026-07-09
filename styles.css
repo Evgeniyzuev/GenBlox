@@ -750,32 +750,47 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
 .wave-hud {
   position: absolute;
   z-index: 7;
-  top: max(78px, calc(env(safe-area-inset-top) + 58px));
-  left: max(12px, env(safe-area-inset-left));
+  top: max(54px, calc(env(safe-area-inset-top) + 42px));
+  left: max(8px, env(safe-area-inset-left));
   display: grid;
-  grid-template-columns: repeat(3, minmax(94px, auto));
-  gap: 8px;
+  grid-template-columns: repeat(4, auto);
+  gap: 5px;
   pointer-events: none;
 }
 .wave-hud > div:not(.wave-collect):not(.wave-controls) {
-  display: grid;
-  gap: 2px;
-  min-width: 94px;
-  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 7px;
   border: 1px solid rgba(255,255,255,.14);
   background: rgba(15,18,36,.68);
   backdrop-filter: blur(10px);
 }
 .wave-hud small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 900;
-  letter-spacing: 1.4px;
+  letter-spacing: .5px;
 }
 .wave-hud strong {
   color: var(--ink);
-  font-size: 16px;
+  font-size: 12px;
   font-weight: 900;
+  white-space: nowrap;
+}
+.wave-stat.is-value {
+  padding-inline: 8px;
+}
+.wave-rank {
+  grid-column: 1 / -1;
+  max-width: min(360px, calc(100vw - 18px));
+  overflow: hidden;
+}
+.wave-rank strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .wave-collect {
   grid-column: 1 / -1;
@@ -795,6 +810,7 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   transform-origin: left;
 }
 .wave-controls {
+  display: none;
   grid-column: 1 / -1;
   max-width: 470px;
   padding: 8px 12px;
@@ -1148,8 +1164,8 @@ footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--mut
   .worms-map-button { min-height: 112px; }
   .micro-map-choice { padding: 12px 26px; }
   .micro-map-button { min-height: 112px; }
-  .wave-hud { top: 48px; grid-template-columns: repeat(3, minmax(74px, auto)); }
-  .wave-hud > div:not(.wave-collect):not(.wave-controls) { min-width: 74px; padding: 6px 9px; }
+  .wave-hud { top: 42px; grid-template-columns: repeat(4, auto); gap: 4px; }
+  .wave-hud > div:not(.wave-collect):not(.wave-controls) { padding: 3px 6px; }
   .wave-controls { display: none; }
   .wave-touch { display: flex; }
 }

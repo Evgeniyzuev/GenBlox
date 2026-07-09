@@ -507,6 +507,10 @@ function syncRoom() {
           network: {
             role: client.isHost ? "host" : "guest",
             playerId: client.playerId,
+            getPlayers: () => client.players.slice(0, 2).map((player, index) => ({
+              id: player.id,
+              name: index === 0 ? "Host" : `Player ${index + 1}`,
+            })),
             publish: (snapshot) => client.setGameState("wave-runners", snapshot, false),
             sendInput: (input) => client.setLocalPlayerState("wave-runners:input", input, false),
             getInputs: () => client.getAllPlayerStates("wave-runners:input"),

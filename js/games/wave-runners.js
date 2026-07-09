@@ -27,6 +27,8 @@ const MATCH_TARGETS = [20000, 50000, 100000];
 const MAX_ACTIVE_TROPHIES = 180;
 const TROPHY_RESPAWN_INTERVAL = 30;
 const WAVE_QUEUE_SECONDS = 30;
+const PLAYER_COLORS = [0x4aa7ff, 0xff8a3d];
+const PLAYER_HAIR_COLORS = [0x2b1f27, 0x412f18];
 const TROPHY_TIERS = [
   { max: 500, items: ["🥦", "🥕", "🧅"] },
   { max: 1000, items: ["🍇", "🍌", "🍓"] },
@@ -151,6 +153,8 @@ export class WaveRunnersGame {
     this.netcode = new RealtimeSnapshotChannel({ network: this.network, kind: "wave-runners", playerId: "solo" });
     this.networkRole = this.netcode.role;
     this.playerId = this.netcode.playerId;
+    this.humanSlots = this.normalizeHumanSlots(this.resolveHumanSlots());
+    this.localSlot = this.findLocalSlot();
     this.selectedMap = WAVE_MAPS[0];
     this.money = 0;
     this.speedLevel = 0;
@@ -222,12 +226,11 @@ export class WaveRunnersGame {
     this.hud = document.createElement("div");
     this.hud.className = "wave-hud";
     this.hud.innerHTML = `
-      <div><small>DISTANCE</small><strong data-wave-distance>0 m</strong></div>
-      <div><small>MONEY</small><strong data-wave-money>$0</strong></div>
-      <div><small>SPEED</small><strong data-wave-speed>8.7</strong></div>
-      <div><small>TAKE RATE</small><strong data-wave-take-rate>$76/s</strong></div>
-      <div><small>RANKING</small><strong data-wave-ranking>-</strong></div>
-      <div><small>STATE</small><strong data-wave-state>RUNNING</strong></div>
+      <div class="wave-stat is-value"><strong data-wave-distance>0 m</strong></div>
+      <div class="wave-stat is-value"><strong data-wave-money>$0</strong></div>
+      <div class="wave-stat"><small>S</small><strong data-wave-speed>8.7</strong></div>
+      <div class="wave-stat"><small>T</small><strong data-wave-take-rate>$76/s</strong></div>
+      <div class="wave-rank"><strong data-wave-ranking>-</strong></div>
       <div class="wave-collect" data-wave-collect hidden><span></span></div>
       <div class="wave-controls">W/S move, A/D turn, Space jumps, E harvests. On phone use the stick and right buttons.</div>
     `;
@@ -250,7 +253,6 @@ export class WaveRunnersGame {
     this.speedEl = this.hud.querySelector("[data-wave-speed]");
     this.takeRateEl = this.hud.querySelector("[data-wave-take-rate]");
     this.rankingEl = this.hud.querySelector("[data-wave-ranking]");
-    this.stateEl = this.hud.querySelector("[data-wave-state]");
     this.collectEl = this.hud.querySelector("[data-wave-collect]");
     this.collectBar = this.collectEl.querySelector("span");
     this.stickEl = this.touchControls.querySelector("[data-wave-stick]");
@@ -325,6 +327,7 @@ export class WaveRunnersGame {
     this.remoteParts = this.remoteGroup.userData.parts;
     this.remoteGroup.visible = Boolean(this.bot || this.network);
     this.scene.add(this.remoteGroup);
+    this.updatePlayerPalette();
 
     this.resize();
     this.generateChunksAround(0);
@@ -355,6 +358,76 @@ export class WaveRunnersGame {
     };
     group.userData.parts = parts;
     return group;
+  }
+
+  resolveHumanSlots() {
+    if (!this.network) return [{ playerId: "solo", slot: 0, name: "You" }];
+    const players = this.network.getPlayers?.() ?? [];
+    return players.slice(0, 2).map((player, slot) => ({
+      playerId: player.id,
+      slot,
+      name: player.name ?? (slot === 0 ? "Host" : `Player ${slot + 1}`),
+    }));
+  }
+
+  normalizeHumanSlots(slots = []) {
+    const seen = new Set();
+    return slots
+      .filter((entry) => entry?.playerId && Number.isInteger(entry.slot) && entry.slot >= 0 && entry.slot < 2)
+      .sort((a, b) => a.slot - b.slot)
+      .filter((entry) => {
+        if (seen.has(entry.playerId) || seen.has(`slot:${entry.slot}`)) return false;
+        seen.add(entry.playerId);
+        seen.add(`slot:${entry.slot}`);
+        return true;
+      })
+      .map((entry) => ({
+        playerId: entry.playerId,
+        slot: entry.slot,
+        name: entry.name ?? (entry.slot === 0 ? "Host" : `Player ${entry.slot + 1}`),
+      }));
+  }
+
+  humanSlotsKey(slots = this.humanSlots) {
+    return (slots ?? []).map((entry) => `${entry.slot}:${entry.playerId}`).join("|");
+  }
+
+  findLocalSlot() {
+    const match = this.humanSlots.find((entry) => entry.playerId === this.playerId);
+    if (match) return match.slot;
+    return this.networkRole === "guest" ? 1 : 0;
+  }
+
+  playerName(playerId = this.playerId) {
+    const slot = this.humanSlots.find((entry) => entry.playerId === playerId);
+    if (slot) return slot.name;
+    if (!this.network) return "You";
+    return playerId === this.playerId ? "You" : "Player";
+  }
+
+  remoteSlot() {
+    if (this.bot) return 1;
+    const remote = this.humanSlots.find((entry) => entry.playerId !== this.playerId);
+    return remote?.slot ?? (this.localSlot === 0 ? 1 : 0);
+  }
+
+  updatePlayerPalette() {
+    if (!this.materials) return;
+    const localSlot = clamp(this.localSlot ?? 0, 0, PLAYER_COLORS.length - 1);
+    const remoteSlot = clamp(this.remoteSlot(), 0, PLAYER_COLORS.length - 1);
+    this.materials.playerBody.color.setHex(PLAYER_COLORS[localSlot]);
+    this.materials.playerHair.color.setHex(PLAYER_HAIR_COLORS[localSlot]);
+    this.materials.remoteBody.color.setHex(PLAYER_COLORS[remoteSlot]);
+    this.materials.remoteHair.color.setHex(PLAYER_HAIR_COLORS[remoteSlot]);
+  }
+
+  refreshHumanSlotsFromNetwork() {
+    if (!this.network || this.networkRole !== "host") return;
+    const slots = this.normalizeHumanSlots(this.resolveHumanSlots());
+    if (slots.length === 0 || this.humanSlotsKey(slots) === this.humanSlotsKey()) return;
+    this.humanSlots = slots;
+    this.localSlot = this.findLocalSlot();
+    this.updatePlayerPalette();
   }
 
   createBase() {
@@ -980,12 +1053,13 @@ export class WaveRunnersGame {
 
   updateNetworkHost(dt) {
     if (!this.network || this.networkRole !== "host") return;
+    this.refreshHumanSlotsFromNetwork();
     const inputs = this.netcode.getInputs();
     this.remoteRanking = inputs
       .filter((entry) => entry.value && entry.playerId !== this.playerId)
       .map((entry, index) => ({
         id: entry.playerId,
-        name: `Player ${index + 2}`,
+        name: this.playerName(entry.playerId) || `Player ${index + 2}`,
         score: Number(entry.value.score) || 0,
         pose: entry.value.pose ?? null,
       }));
@@ -1005,9 +1079,11 @@ export class WaveRunnersGame {
 
   publishSnapshot(force = false) {
     if (!this.network || this.networkRole !== "host") return;
+    this.refreshHumanSlotsFromNetwork();
     this.netcode.publish({
       phase: this.phase,
       mapId: this.selectedMap.id,
+      humanSlots: this.humanSlots,
       targetScore: this.targetScore,
       winner: this.winner,
       claimed: [...this.claimedTrophyIds],
@@ -1027,6 +1103,12 @@ export class WaveRunnersGame {
   applyNetworkSnapshot(snapshot) {
     if (!snapshot || snapshot.kind !== "wave-runners" || this.networkRole !== "guest") return;
     this.targetScore = snapshot.targetScore ?? this.targetScore;
+    const snapshotSlots = this.normalizeHumanSlots(snapshot.humanSlots ?? []);
+    if (snapshotSlots.length > 0 && this.humanSlotsKey(snapshotSlots) !== this.humanSlotsKey()) {
+      this.humanSlots = snapshotSlots;
+      this.localSlot = this.findLocalSlot();
+      this.updatePlayerPalette();
+    }
     this.applyMap(snapshot.mapId ?? this.selectedMap.id);
     this.winner = snapshot.winner ?? null;
     this.networkQueueExpired = false;
@@ -1346,7 +1428,7 @@ export class WaveRunnersGame {
   }
 
   rankingEntries() {
-    const localName = this.networkRole === "host" ? "Host" : "You";
+    const localName = this.playerName(this.playerId);
     const entries = [{ id: this.playerId, name: localName, score: this.totalScore, pose: this.playerPose() }];
     if (this.bot) {
       entries.push({
@@ -1628,7 +1710,7 @@ export class WaveRunnersGame {
     this.takeRateEl.textContent = `$${this.currentCollectRate()}/s`;
     this.rankingEl.textContent = this.rankingEntries()
       .slice(0, 3)
-      .map((entry) => `${entry.name}: $${Math.floor(entry.score)}`)
+      .map((entry, index) => `${index + 1} ${entry.name} $${Math.floor(entry.score)}`)
       .join(" / ");
     this.player.state = this.collecting
       ? PLAYER_STATES.COLLECTING
@@ -1637,7 +1719,6 @@ export class WaveRunnersGame {
         : this.player.inTrench
           ? PLAYER_STATES.IN_TRENCH
           : PLAYER_STATES.RUNNING;
-    this.stateEl.textContent = this.player.state;
     this.collectEl.hidden = !this.collecting;
     this.collectBar.style.transform = `scaleX(${this.collecting ? clamp(this.collecting.progress, 0, 1) : 0})`;
     this.overlay.style.opacity = String(clamp(this.deathFlash, 0, 0.9));
