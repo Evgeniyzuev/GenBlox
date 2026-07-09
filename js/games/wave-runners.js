@@ -5,7 +5,15 @@ const rand = (min, max) => min + Math.random() * (max - min);
 const PLAYER_MAX_SPEED = 8.7;
 const MAX_GREEN_SURFACE_RUN = 68;
 const GREEN_SAFETY_MARGIN = 1.2;
-const TROPHY_ITEMS = ["💎", "🍎", "🍌", "🍓", "🍕", "⚽", "🎧", "📱", "🧸", "🐱", "🐶", "🦊", "🦄", "🏆", "⭐", "🚀"];
+const BASE_COLLECT_RATE = 76;
+const TROPHY_TIERS = [
+  { max: 500, items: ["🍎", "🍌", "🍓"] },
+  { max: 1000, items: ["🍕", "⚽", "🎧"] },
+  { max: 2000, items: ["📱", "🧸", "⭐"] },
+  { max: 4000, items: ["🐱", "🐶", "🦊"] },
+  { max: 8000, items: ["🦄", "💎", "🏆"] },
+  { max: Infinity, items: ["🚀", "👑", "🌌"] },
+];
 
 const PLAYER_STATES = {
   RUNNING: "RUNNING",
@@ -42,7 +50,9 @@ export class WaveRunnersGame {
     this.lootValue = 0;
     this.money = 0;
     this.speedLevel = 0;
-    this.upgradeCost = 80;
+    this.collectRateLevel = 0;
+    this.speedUpgradeCost = 120;
+    this.collectUpgradeCost = 80;
     this.wasActionPressed = false;
     this.collecting = null;
     this.deathFlash = 0;
@@ -93,7 +103,8 @@ export class WaveRunnersGame {
     this.hud.innerHTML = `
       <div><small>DISTANCE</small><strong data-wave-distance>0 m</strong></div>
       <div><small>MONEY</small><strong data-wave-money>$0</strong></div>
-      <div><small>SPEED</small><strong data-wave-speed>1</strong></div>
+      <div><small>SPEED</small><strong data-wave-speed>8.7</strong></div>
+      <div><small>TAKE RATE</small><strong data-wave-take-rate>$76/s</strong></div>
       <div><small>STATE</small><strong data-wave-state>RUNNING</strong></div>
       <div class="wave-collect" data-wave-collect hidden><span></span></div>
       <div class="wave-controls">W/S move, A/D turn, Space jumps, E harvests. On phone use the stick and right buttons.</div>
@@ -113,6 +124,7 @@ export class WaveRunnersGame {
     this.distanceEl = this.hud.querySelector("[data-wave-distance]");
     this.moneyEl = this.hud.querySelector("[data-wave-money]");
     this.speedEl = this.hud.querySelector("[data-wave-speed]");
+    this.takeRateEl = this.hud.querySelector("[data-wave-take-rate]");
     this.stateEl = this.hud.querySelector("[data-wave-state]");
     this.collectEl = this.hud.querySelector("[data-wave-collect]");
     this.collectBar = this.collectEl.querySelector("span");
@@ -209,33 +221,49 @@ export class WaveRunnersGame {
   createBase() {
     this.baseGroup = new THREE.Group();
     this.scene.add(this.baseGroup);
-    const safeStrip = new THREE.Mesh(new THREE.BoxGeometry(this.trackWidth, 0.5, 18), this.materials.safe);
-    safeStrip.position.set(0, 0.08, -4);
+    const safeStrip = new THREE.Mesh(new THREE.BoxGeometry(this.trackWidth, 0.5, 28), this.materials.safe);
+    safeStrip.position.set(0, 0.08, 8);
     safeStrip.receiveShadow = true;
     this.baseGroup.add(safeStrip);
 
     const house = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 2.7, 3.6), this.materials.house);
-    body.position.set(0, 1.2, 0);
-    body.castShadow = true;
-    body.receiveShadow = true;
-    house.add(body);
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(3.2, 1.8, 4), this.materials.roof);
-    roof.position.set(0, 3.25, 0);
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(22.5, 1.05, 18.6), this.materials.house);
+    floor.position.set(0, 0.18, 0);
+    floor.receiveShadow = true;
+    house.add(floor);
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(22.5, 9.6, 1.05), this.materials.house);
+    backWall.position.set(0, 4.8, -9.3);
+    backWall.castShadow = true;
+    house.add(backWall);
+    [-1, 1].forEach((side) => {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(1.05, 9.6, 18.6), this.materials.house);
+      wall.position.set(side * 11.25, 4.8, 0);
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      house.add(wall);
+    });
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(16.2, 6.3, 4), this.materials.roof);
+    roof.position.set(0, 12.15, 0);
     roof.rotation.y = Math.PI / 4;
     roof.castShadow = true;
     house.add(roof);
-    house.position.set(-11.5, 0.1, -7);
+    house.position.set(-5.5, 0.1, 8);
     this.baseGroup.add(house);
-    this.baseGroup.add(this.createTextSprite("HOME", "#f8f7ff", "rgba(15,18,36,.72)", 1.9, 0.7, -11.5, 4.5, -7));
+    this.baseGroup.add(this.createTextSprite("HOME", "#f8f7ff", "rgba(15,18,36,.72)", 3.8, 1.25, -5.5, 14.1, 8));
 
+    this.speedMachine = this.createUpgradeMachine(11.5, 4.2, "SPEED", this.speedUpgradeCost, "#63dcff");
+    this.collectMachine = this.createUpgradeMachine(11.5, 11.2, "TAKE", this.collectUpgradeCost, "#b7f34a");
+  }
+
+  createUpgradeMachine(x, z, label, cost, color) {
     const machine = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3.2, 1.4), this.materials.machine);
-    machine.position.set(10.5, 1.55, -5.5);
+    machine.position.set(x, 1.55, z);
     machine.castShadow = true;
     machine.receiveShadow = true;
     this.baseGroup.add(machine);
-    this.upgradeLabel = this.createTextSprite(`SPEED $${this.upgradeCost}`, "#171525", "#b7f34a", 2.8, 0.8, 10.5, 3.7, -5.5);
-    this.baseGroup.add(this.upgradeLabel);
+    const sign = this.createTextSprite(`${label} $${cost}`, "#171525", color, 2.8, 0.8, x, 3.7, z);
+    this.baseGroup.add(sign);
+    return { x, z, machine, sign, label };
   }
 
   createTextSprite(text, color, background, width, height, x, y, z) {
@@ -481,10 +509,10 @@ export class WaveRunnersGame {
     if (trench && z > trench.z0 - 2 && z < trench.z1 + 2) {
       z = Math.random() < 0.5 ? trench.z0 - 3 : trench.z1 + 3;
     }
-    const distanceValue = Math.max(1, Math.floor(z / 12));
-    const randomMultiplier = rand(0.55, 4.8);
-    const value = Math.max(5, Math.round((8 + distanceValue * 3.4) * randomMultiplier));
-    const symbol = TROPHY_ITEMS[Math.floor(Math.random() * TROPHY_ITEMS.length)];
+    const randomMultiplier = rand(1, 5);
+    const value = Math.max(5, Math.round((Math.max(3, z) ** 1.5 * randomMultiplier) / 14));
+    const symbol = this.trophySymbolForValue(value);
+    const collectNeed = value * rand(1, 3);
     const sprite = this.createEmojiSprite(symbol, 1.25 + clamp(value / 300, 0, 0.45));
     let x = rand(-this.trackWidth / 2 + 2.5, this.trackWidth / 2 - 2.5);
     if (trench && z >= trench.z0 - 1 && z <= trench.z1 + 1 && Math.abs(x - trench.x) < trench.width / 2 + 1.2) {
@@ -495,7 +523,12 @@ export class WaveRunnersGame {
     const priceSprite = this.createTextSprite(`$${value}`, "#171525", "rgba(183,243,74,.92)", 1.75, 0.55, x, 2.75, z);
     priceSprite.visible = false;
     this.trophyGroup.add(priceSprite);
-    this.trophiesWorld.push({ sprite, priceSprite, symbol, x: sprite.position.x, z, value, progress: 0, collected: false });
+    this.trophiesWorld.push({ sprite, priceSprite, symbol, x: sprite.position.x, z, value, collectNeed, collectedValue: 0, progress: 0, collected: false });
+  }
+
+  trophySymbolForValue(value) {
+    const tier = TROPHY_TIERS.find((item) => value <= item.max) ?? TROPHY_TIERS[TROPHY_TIERS.length - 1];
+    return tier.items[Math.floor(Math.random() * tier.items.length)];
   }
 
   disposeTrophy(trophy) {
@@ -542,8 +575,8 @@ export class WaveRunnersGame {
   }
 
   updateInput(dt) {
-    const left = this.keys.has("a") || this.keys.has("arrowright");
-    const right = this.keys.has("d") || this.keys.has("arrowleft");
+    const left = this.keys.has("d") || this.keys.has("arrowright");
+    const right = this.keys.has("a") || this.keys.has("arrowleft");
     const forward = this.keys.has("w") || this.keys.has("arrowup");
     const back = this.keys.has("s") || this.keys.has("arrowdown");
     const harvest = this.keys.has("e") || this.mobileInput.action;
@@ -563,6 +596,10 @@ export class WaveRunnersGame {
 
   currentMaxSpeed() {
     return PLAYER_MAX_SPEED + this.speedLevel * 0.65;
+  }
+
+  currentCollectRate() {
+    return BASE_COLLECT_RATE + this.collectRateLevel * 28;
   }
 
   updatePhysics(dt) {
@@ -587,12 +624,13 @@ export class WaveRunnersGame {
   updateCollecting(dt) {
     if (this.collecting?.collected) this.collecting = null;
     const harvest = this.keys.has("e") || this.mobileInput.action;
-    if (this.isNearUpgradeMachine()) return;
+    if (this.nearbyUpgradeMachine()) return;
     if (!harvest || !this.player.grounded || this.player.inTrench || this.lastInputMove > 0.4) return;
     const trophy = this.collecting ?? this.trophiesWorld.find((item) => Math.hypot(item.x - this.player.x, item.z - this.player.z) < 1.45);
     if (!trophy) return;
     this.collecting = trophy;
-    trophy.progress += dt / 1.5;
+    trophy.collectedValue += this.currentCollectRate() * dt;
+    trophy.progress = clamp(trophy.collectedValue / trophy.collectNeed, 0, 1);
     if (trophy.progress >= 1) {
       trophy.collected = true;
       this.trophies += 1;
@@ -605,43 +643,73 @@ export class WaveRunnersGame {
     }
   }
 
-  isNearUpgradeMachine() {
-    return Math.hypot(this.player.x - 10.5, this.player.z + 5.5) < 3.2 && this.player.grounded && !this.player.inTrench;
+  nearbyUpgradeMachine() {
+    if (!this.player.grounded || this.player.inTrench) return null;
+    const machines = [
+      { kind: "speed", ...this.speedMachine },
+      { kind: "collect", ...this.collectMachine },
+    ];
+    return machines.find((machine) => Math.hypot(this.player.x - machine.x, this.player.z - machine.z) < 4) ?? null;
   }
 
   updateBaseInteraction() {
     const action = this.keys.has("e") || this.mobileInput.action;
-    if (action && !this.wasActionPressed && this.isNearUpgradeMachine()) {
-      if (this.money >= this.upgradeCost) {
-        this.money -= this.upgradeCost;
-        this.speedLevel += 1;
-        this.upgradeCost = Math.round(this.upgradeCost * 1.75 + 35);
-        this.baseGroup.remove(this.upgradeLabel);
-        this.upgradeLabel.material.map?.dispose();
-        this.upgradeLabel.material.dispose();
-        this.upgradeLabel = this.createTextSprite(`SPEED $${this.upgradeCost}`, "#171525", "#b7f34a", 2.8, 0.8, 10.5, 3.7, -5.5);
-        this.baseGroup.add(this.upgradeLabel);
-        this.callbacks.onStatus?.(`Speed upgraded to level ${this.speedLevel + 1}.`);
-      } else {
-        this.callbacks.onStatus?.(`Need $${this.upgradeCost} for the next speed upgrade.`);
-      }
+    const machine = this.nearbyUpgradeMachine();
+    if (action && !this.wasActionPressed && machine) {
+      if (machine.kind === "speed") this.buySpeedUpgrade();
+      else this.buyCollectUpgrade();
       this.cancelCollect();
     }
     this.wasActionPressed = action;
   }
 
+  buySpeedUpgrade() {
+    if (this.money < this.speedUpgradeCost) {
+      this.callbacks.onStatus?.(`Need $${this.speedUpgradeCost} for the next speed upgrade.`);
+      return;
+    }
+    this.money -= this.speedUpgradeCost;
+    this.speedLevel += 1;
+    this.speedUpgradeCost = Math.round(this.speedUpgradeCost * 1.7 + 45);
+    this.refreshMachineLabel("speed", `SPEED $${this.speedUpgradeCost}`, "#63dcff");
+    this.callbacks.onStatus?.(`Speed upgraded: ${this.currentMaxSpeed().toFixed(1)}.`);
+  }
+
+  buyCollectUpgrade() {
+    if (this.money < this.collectUpgradeCost) {
+      this.callbacks.onStatus?.(`Need $${this.collectUpgradeCost} for the next harvest upgrade.`);
+      return;
+    }
+    this.money -= this.collectUpgradeCost;
+    this.collectRateLevel += 1;
+    this.collectUpgradeCost = Math.round(this.collectUpgradeCost * 1.75 + 35);
+    this.refreshMachineLabel("collect", `TAKE $${this.collectUpgradeCost}`, "#b7f34a");
+    this.callbacks.onStatus?.(`Harvest upgraded: $${this.currentCollectRate()}/s.`);
+  }
+
+  refreshMachineLabel(kind, text, color) {
+    const holder = kind === "speed" ? this.speedMachine : this.collectMachine;
+    this.baseGroup.remove(holder.sign);
+    holder.sign.material.map?.dispose();
+    holder.sign.material.dispose();
+    holder.sign = this.createTextSprite(text, "#171525", color, 2.8, 0.8, holder.x, 3.7, holder.z);
+    this.baseGroup.add(holder.sign);
+  }
+
   spawnHouseTrophy(symbol) {
     const sprite = this.createEmojiSprite(symbol, 0.82);
     const index = this.houseTrophyGroup.children.length;
-    const column = index % 6;
-    const row = Math.floor(index / 6) % 4;
-    sprite.position.set(-14 + column * 0.95, 1.25 + row * 0.62, -3.9);
+    const column = index % 10;
+    const row = Math.floor(index / 10) % 6;
+    const shelf = Math.floor(index / 60) % 3;
+    sprite.position.set(-15 + column * 1.05, 1.25 + row * 0.72, 2.1 + shelf * 2.1);
     this.houseTrophyGroup.add(sprite);
   }
 
   cancelCollect() {
     if (!this.collecting) return;
-    this.collecting.progress = Math.max(0, this.collecting.progress - 0.02);
+    this.collecting.progress = 0;
+    this.collecting.collectedValue = 0;
     this.collecting = null;
   }
 
@@ -735,7 +803,8 @@ export class WaveRunnersGame {
     this.distance = Math.max(this.distance, Math.floor(this.player.z));
     this.distanceEl.textContent = `${Math.floor(this.distance)} m`;
     this.moneyEl.textContent = `$${this.money}`;
-    this.speedEl.textContent = `${this.speedLevel + 1} (${this.currentMaxSpeed().toFixed(1)})`;
+    this.speedEl.textContent = this.currentMaxSpeed().toFixed(1);
+    this.takeRateEl.textContent = `$${this.currentCollectRate()}/s`;
     this.player.state = this.collecting
       ? PLAYER_STATES.COLLECTING
       : !this.player.grounded
