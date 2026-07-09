@@ -268,7 +268,7 @@ export class MicroMachinesGame {
     this.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
   }
 
-  start(trackId, publish = true) {
+  start(trackId, publish = true, humanSlots = null) {
     this.track = TRACKS.find((track) => track.id === trackId) ?? TRACKS[0];
     this.state = "racing";
     this.mapChoice.hidden = true;
@@ -287,7 +287,7 @@ export class MicroMachinesGame {
       respawn: 0,
     }));
     this.props = this.track.props.map((prop, index) => ({ ...prop, id: index, alive: true }));
-    this.humanSlots = this.resolveHumanSlots();
+    this.humanSlots = this.normalizeHumanSlots(humanSlots ?? this.resolveHumanSlots());
     this.localSlot = this.findLocalSlot();
     this.racers = this.createRacers();
     this.callbacks.onStatus?.("Race to 3 laps. Pick up weapons and stay on the track.");
@@ -302,6 +302,28 @@ export class MicroMachinesGame {
       slot,
       name: player.name ?? (slot === 0 ? "Host" : `Player ${slot + 1}`),
     }));
+  }
+
+  normalizeHumanSlots(slots = []) {
+    const seen = new Set();
+    return slots
+      .filter((entry) => entry?.playerId && Number.isInteger(entry.slot) && entry.slot >= 0 && entry.slot < 4)
+      .sort((a, b) => a.slot - b.slot)
+      .filter((entry) => {
+        if (seen.has(entry.playerId) || seen.has(`slot:${entry.slot}`)) return false;
+        seen.add(entry.playerId);
+        seen.add(`slot:${entry.slot}`);
+        return true;
+      })
+      .map((entry) => ({
+        playerId: entry.playerId,
+        slot: entry.slot,
+        name: entry.name ?? (entry.slot === 0 ? "Host" : `Player ${entry.slot + 1}`),
+      }));
+  }
+
+  humanSlotsKey(slots = this.humanSlots) {
+    return (slots ?? []).map((entry) => `${entry.slot}:${entry.playerId}`).join("|");
   }
 
   findLocalSlot() {
@@ -990,8 +1012,8 @@ export class MicroMachinesGame {
   applyRemoteRacerStates() {
     if (!this.racers?.length) return;
     for (const state of this.remoteRacerStates.values()) {
-      if (!state || state.slot === this.localSlot) continue;
-      const racer = this.racers.find((item) => item.id === state.id || item.slot === state.slot);
+      if (!state || state.slot === this.localSlot || state.id === this.playerId) continue;
+      const racer = this.racers.find((item) => item.id === state.id) ?? this.racers.find((item) => item.slot === state.slot && item.id !== this.playerId);
       if (!racer || racer.bot) continue;
       racer.x += (state.x - racer.x) * 0.55;
       racer.y += (state.y - racer.y) * 0.55;
@@ -1010,6 +1032,7 @@ export class MicroMachinesGame {
     const snapshot = {
       phase: this.state,
       mapId: this.track.id,
+      humanSlots: this.humanSlots,
       racers: this.racers.map((racer) => this.compactRacerState(racer)),
       pickups: force ? this.pickups : undefined,
       projectiles: force ? this.projectiles : undefined,
@@ -1031,16 +1054,20 @@ export class MicroMachinesGame {
       this.callbacks.onStatus?.("The room host is choosing a track...");
       return;
     }
-    if (!this.track || this.track.id !== snapshot.mapId) {
-      this.start(snapshot.mapId, false);
+    const snapshotSlots = this.normalizeHumanSlots(snapshot.humanSlots ?? []);
+    const shouldRestart = !this.track
+      || this.track.id !== snapshot.mapId
+      || (snapshotSlots.length > 0 && this.humanSlotsKey(snapshotSlots) !== this.humanSlotsKey());
+    if (shouldRestart) {
+      this.start(snapshot.mapId, false, snapshotSlots.length > 0 ? snapshotSlots : null);
     }
     if (snapshot.pickups) this.pickups = cloneSnapshot(snapshot.pickups);
     if (snapshot.projectiles) this.projectiles = cloneSnapshot(snapshot.projectiles);
     if (snapshot.hazards) this.hazards = cloneSnapshot(snapshot.hazards);
     if (snapshot.props) this.props = cloneSnapshot(snapshot.props);
     (snapshot.racers ?? []).forEach((state) => {
-      if (!state || state.slot === this.localSlot) return;
-      const racer = this.racers.find((item) => item.id === state.id || item.slot === state.slot);
+      if (!state || state.slot === this.localSlot || state.id === this.playerId) return;
+      const racer = this.racers.find((item) => item.id === state.id) ?? this.racers.find((item) => item.slot === state.slot && item.id !== this.playerId);
       if (racer && !racer.bot) this.remoteRacerStates.set(racer.id, state);
     });
     this.applyRemoteRacerStates();
