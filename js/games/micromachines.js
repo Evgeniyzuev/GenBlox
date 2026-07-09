@@ -1,3 +1,5 @@
+import { RealtimeSnapshotChannel } from "../core/realtime-netcode.js";
+
 const TAU = Math.PI * 2;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -149,8 +151,9 @@ export class MicroMachinesGame {
     this.root = root;
     this.callbacks = callbacks;
     this.network = callbacks.network ?? null;
-    this.networkRole = this.network?.role ?? "solo";
-    this.playerId = this.network?.playerId ?? "solo";
+    this.netcode = new RealtimeSnapshotChannel({ network: this.network, kind: "micromachines", playerId: "solo" });
+    this.networkRole = this.netcode.role;
+    this.playerId = this.netcode.playerId;
     this.canvas = document.createElement("canvas");
     this.canvas.className = "micro-canvas";
     this.canvas.width = 960;
@@ -166,6 +169,7 @@ export class MicroMachinesGame {
     this.pointers = new Map();
     this.localInput = { throttle: 0, steer: 0, brake: 0, reverse: 0, fireSeq: 0 };
     this.remoteInputs = new Map();
+    this.remoteRacerStates = new Map();
     this.running = true;
     this.state = "maps";
     this.fixedStep = 1 / 60;
@@ -424,18 +428,15 @@ export class MicroMachinesGame {
     this.localInput.steer = clamp(steer, -1, 1);
     this.localInput.brake = clamp(brake, 0, 1);
     this.localInput.reverse = clamp(reverse, 0, 1);
-    if (this.networkRole === "guest") this.sendNetworkInput();
+    if (this.network) this.sendNetworkInput();
   }
 
   fire() {
     if (this.state !== "racing") return;
     this.localInput.fireSeq += 1;
-    if (this.networkRole === "guest") {
-      this.sendNetworkInput(true);
-      return;
-    }
     const racer = this.racers?.[this.localSlot];
     if (racer) this.useItem(racer);
+    if (this.network) this.sendNetworkInput(true);
   }
 
   sendNetworkInput(force = false) {
@@ -443,20 +444,29 @@ export class MicroMachinesGame {
     const now = performance.now();
     if (!force && now - (this.lastInputSent ?? 0) < 50) return;
     this.lastInputSent = now;
-    this.network.sendInput?.({ ...this.localInput, t: Date.now() });
+    this.netcode.sendInput({
+      ...this.localInput,
+      phase: this.state,
+      mapId: this.track?.id ?? null,
+      tick: this.tick ?? 0,
+      racer: this.compactRacerState(this.racers?.[this.localSlot]),
+    });
   }
 
   updateRemoteInputs() {
     this.remoteInputs.clear();
-    const states = this.network?.getInputs?.() ?? [];
+    this.remoteRacerStates.clear();
+    const states = this.netcode.getInputs();
     states.forEach(({ playerId, value }) => {
-      if (value) this.remoteInputs.set(playerId, value);
+      if (!value) return;
+      this.remoteInputs.set(playerId, value);
+      if (value.racer) this.remoteRacerStates.set(playerId, value.racer);
     });
   }
 
   inputFor(racer) {
     if (racer.respawn > 0 || racer.finished) return { throttle: 0, steer: 0, brake: 0, reverse: 0, fireSeq: 0 };
-    if (racer.slot === this.localSlot && this.networkRole !== "guest") return this.localInput;
+    if (racer.slot === this.localSlot) return this.localInput;
     if (!racer.bot) return this.remoteInputs.get(racer.id) ?? { throttle: 0, steer: 0, brake: 0, reverse: 0, fireSeq: 0 };
     return this.botInput(racer);
   }
@@ -484,7 +494,7 @@ export class MicroMachinesGame {
   }
 
   step(dt) {
-    if (this.state !== "racing" || this.networkRole === "guest") return;
+    if (this.state !== "racing") return;
     this.tick += 1;
     this.updateRemoteInputs();
     this.pickups.forEach((pickup) => {
@@ -499,6 +509,7 @@ export class MicroMachinesGame {
     this.updateCollisions(dt);
     this.updateProjectiles(dt);
     this.updateProps();
+    this.applyRemoteRacerStates();
     const finishers = this.racers.filter((racer) => racer.lap >= 3 && !racer.finished);
     for (const finisher of finishers) {
       finisher.finished = true;
@@ -949,23 +960,67 @@ export class MicroMachinesGame {
     });
   }
 
+  compactRacerState(racer) {
+    if (!racer) return null;
+    return {
+      slot: racer.slot,
+      id: racer.id,
+      x: Number(racer.x.toFixed(2)),
+      y: Number(racer.y.toFixed(2)),
+      vx: Number(racer.vx.toFixed(2)),
+      vy: Number(racer.vy.toFixed(2)),
+      angle: Number(racer.angle.toFixed(4)),
+      hp: Number(racer.hp.toFixed(1)),
+      lap: racer.lap,
+      checkpoint: racer.checkpoint,
+      lastProgress: Number((racer.lastProgress ?? 0).toFixed(2)),
+      item: racer.item,
+      cooldown: Number((racer.cooldown ?? 0).toFixed(2)),
+      respawn: Number((racer.respawn ?? 0).toFixed(2)),
+      invulnerable: Number((racer.invulnerable ?? 0).toFixed(2)),
+      finished: Boolean(racer.finished),
+      finishPosition: racer.finishPosition,
+      miniBoost: Number((racer.miniBoost ?? 0).toFixed(2)),
+      stun: Number((racer.stun ?? 0).toFixed(2)),
+      scramble: Number((racer.scramble ?? 0).toFixed(2)),
+      slowTime: Number((racer.slowTime ?? 0).toFixed(2)),
+    };
+  }
+
+  applyRemoteRacerStates() {
+    if (!this.racers?.length) return;
+    for (const state of this.remoteRacerStates.values()) {
+      if (!state || state.slot === this.localSlot) continue;
+      const racer = this.racers.find((item) => item.id === state.id || item.slot === state.slot);
+      if (!racer || racer.bot) continue;
+      racer.x += (state.x - racer.x) * 0.55;
+      racer.y += (state.y - racer.y) * 0.55;
+      racer.vx = state.vx;
+      racer.vy = state.vy;
+      const delta = angleDiff(racer.angle, state.angle);
+      racer.angle += delta * 0.55;
+      ["hp", "lap", "checkpoint", "lastProgress", "item", "cooldown", "respawn", "invulnerable", "finished", "finishPosition", "miniBoost", "stun", "scramble", "slowTime"].forEach((key) => {
+        if (state[key] !== undefined) racer[key] = state[key];
+      });
+    }
+  }
+
   publishSnapshot(force = false) {
     if (!this.network || this.networkRole !== "host" || !this.track) return;
     const snapshot = {
-      kind: "micromachines",
       phase: this.state,
       mapId: this.track.id,
-      racers: this.racers,
-      pickups: this.pickups,
-      projectiles: this.projectiles,
-      hazards: this.hazards,
-      props: this.props,
+      racers: this.racers.map((racer) => this.compactRacerState(racer)),
+      pickups: force ? this.pickups : undefined,
+      projectiles: force ? this.projectiles : undefined,
+      hazards: force ? this.hazards : undefined,
+      props: force ? this.props : undefined,
       tick: this.tick,
       winner: this.winner,
       finishOrder: this.finishOrder,
       revision: force ? Date.now() : this.revision += 1,
     };
-    this.network.publish?.(snapshot);
+    this.netcode.publish(snapshot);
   }
 
   applyNetworkSnapshot(snapshot) {
@@ -977,16 +1032,19 @@ export class MicroMachinesGame {
       return;
     }
     if (!this.track || this.track.id !== snapshot.mapId) {
-      this.track = TRACKS.find((track) => track.id === snapshot.mapId) ?? TRACKS[0];
-      this.mapChoice.hidden = true;
-      this.state = "racing";
+      this.start(snapshot.mapId, false);
     }
-    this.racers = cloneSnapshot(snapshot.racers ?? []);
-    this.pickups = cloneSnapshot(snapshot.pickups ?? []);
-    this.projectiles = cloneSnapshot(snapshot.projectiles ?? []);
-    this.hazards = cloneSnapshot(snapshot.hazards ?? []);
-    this.props = cloneSnapshot(snapshot.props ?? []);
-    this.tick = snapshot.tick ?? 0;
+    if (snapshot.pickups) this.pickups = cloneSnapshot(snapshot.pickups);
+    if (snapshot.projectiles) this.projectiles = cloneSnapshot(snapshot.projectiles);
+    if (snapshot.hazards) this.hazards = cloneSnapshot(snapshot.hazards);
+    if (snapshot.props) this.props = cloneSnapshot(snapshot.props);
+    (snapshot.racers ?? []).forEach((state) => {
+      if (!state || state.slot === this.localSlot) return;
+      const racer = this.racers.find((item) => item.id === state.id || item.slot === state.slot);
+      if (racer && !racer.bot) this.remoteRacerStates.set(racer.id, state);
+    });
+    this.applyRemoteRacerStates();
+    this.tick = Math.max(this.tick ?? 0, snapshot.tick ?? 0);
     this.winner = snapshot.winner ?? null;
     this.finishOrder = snapshot.finishOrder ?? [];
     this.localSlot = this.racers.findIndex((racer) => racer.id === this.playerId);
@@ -996,10 +1054,6 @@ export class MicroMachinesGame {
 
   update(dt) {
     this.readLocalInput();
-    if (this.networkRole === "guest") {
-      this.sendNetworkInput();
-      return;
-    }
     this.accumulator += dt;
     while (this.accumulator >= this.fixedStep) {
       this.step(this.fixedStep);
