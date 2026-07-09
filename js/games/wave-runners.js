@@ -63,7 +63,20 @@ export class WaveRunnersGame {
     this.trophies = 0;
     this.lootValue = 0;
     this.totalScore = 0;
-    this.bot = callbacks.bot === false ? null : { name: "Bot", score: 0, money: 0, timer: 4.5, x: 3.8, y: 1.55, z: 5, angle: 0, speed: 6.1 };
+    this.bot = callbacks.bot === false ? null : {
+      name: "Bot",
+      score: 0,
+      money: 0,
+      x: 3.8,
+      y: 1.55,
+      z: 5,
+      angle: 0,
+      speed: 6.1,
+      targetX: 3.8,
+      collecting: null,
+      collectValue: 0,
+      box: new THREE.Box3(),
+    };
     this.network = callbacks.network ?? null;
     this.networkRole = this.network?.role ?? "solo";
     this.playerId = this.network?.playerId ?? "solo";
@@ -397,6 +410,7 @@ export class WaveRunnersGame {
     window.addEventListener("keydown", this.onKeyDown, { passive: false });
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("resize", this.onResize);
+    window.visualViewport?.addEventListener("resize", this.onResize);
     this.stickEl.addEventListener("pointerdown", this.onPointerDown);
     this.stickEl.addEventListener("pointermove", this.onPointerMove);
     this.stickEl.addEventListener("pointerup", this.onPointerUp);
@@ -411,8 +425,17 @@ export class WaveRunnersGame {
 
   resize() {
     const rect = this.root.getBoundingClientRect();
-    const width = Math.max(320, Math.floor(rect.width || window.innerWidth));
-    const height = Math.max(240, Math.floor(rect.height || window.innerHeight));
+    const availableWidth = Math.max(320, Math.floor(rect.width || window.innerWidth));
+    const availableHeight = Math.max(240, Math.floor(rect.height || window.innerHeight));
+    const targetAspect = 16 / 9;
+    let width = availableWidth;
+    let height = Math.floor(width / targetAspect);
+    if (height > availableHeight) {
+      height = availableHeight;
+      width = Math.floor(height * targetAspect);
+    }
+    this.canvasHost.style.width = `${width}px`;
+    this.canvasHost.style.height = `${height}px`;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
@@ -460,13 +483,18 @@ export class WaveRunnersGame {
     this.stickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
 
-  generateChunksAround(z) {
+  generateChunksAround(z, extraZ = z) {
     const current = Math.floor(z / this.chunkLength);
-    for (let index = current - 2; index <= current + 14; index += 1) {
-      if (!this.chunks.has(index)) this.createChunk(index);
-    }
+    const extraCurrent = Math.floor(extraZ / this.chunkLength);
+    [current, extraCurrent].forEach((center) => {
+      for (let index = center - 2; index <= center + 14; index += 1) {
+        if (!this.chunks.has(index)) this.createChunk(index);
+      }
+    });
+    const earliest = Math.min(current, extraCurrent);
+    const latest = Math.max(current, extraCurrent);
     for (const [index, group] of this.chunks.entries()) {
-      if (index < current - 4) {
+      if (index < earliest - 4 || index > latest + 16) {
         this.trackGroup.remove(group);
         group.traverse((child) => {
           child.geometry?.dispose?.();
@@ -475,8 +503,9 @@ export class WaveRunnersGame {
         this.trenches = this.trenches.filter((trench) => trench.chunk !== index);
       }
     }
+    const trailingZ = Math.min(z, extraZ);
     this.trophiesWorld = this.trophiesWorld.filter((trophy) => {
-      if (trophy.z < z - 24 || trophy.collected) {
+      if (trophy.z < trailingZ - 24 || trophy.collected) {
         this.disposeTrophy(trophy);
         return false;
       }
@@ -616,12 +645,12 @@ export class WaveRunnersGame {
     }
   }
 
-  currentTrench(z) {
-    return this.trenches.find((trench) => z >= trench.z0 && z <= trench.z1 && Math.abs(this.player.x - trench.x) <= trench.width / 2) ?? null;
+  currentTrench(x, z) {
+    return this.trenches.find((trench) => z >= trench.z0 && z <= trench.z1 && Math.abs(x - trench.x) <= trench.width / 2) ?? null;
   }
 
-  surfaceY(z) {
-    return this.currentTrench(z)?.depth ?? 1.55;
+  surfaceY(x, z) {
+    return this.currentTrench(x, z)?.depth ?? 1.55;
   }
 
   spawnWave() {
@@ -686,7 +715,7 @@ export class WaveRunnersGame {
   }
 
   updatePhysics(dt) {
-    const groundY = this.surfaceY(this.player.z);
+    const groundY = this.surfaceY(this.player.x, this.player.z);
     this.player.inTrench = groundY < 1;
     if (!this.player.grounded) {
       this.player.vy -= 24 * dt;
@@ -845,20 +874,58 @@ export class WaveRunnersGame {
 
   updateBot(dt) {
     if (!this.bot || this.phase !== "playing" || this.winner) return;
-    const targetSpeed = 6.1 + clamp(this.distance / 260, 0, 2.4);
+    if (this.bot.collecting?.collected) this.bot.collecting = null;
+    const nearbyTrophy = this.findBotTrophy();
+    if (!this.bot.collecting && nearbyTrophy && Math.hypot(nearbyTrophy.x - this.bot.x, nearbyTrophy.z - this.bot.z) < COLLECT_RADIUS * 0.95) {
+      this.bot.collecting = nearbyTrophy;
+      this.bot.collectValue = 0;
+    }
+    if (this.bot.collecting) {
+      this.bot.speed += (0 - this.bot.speed) * (1 - Math.exp(-10 * dt));
+      this.bot.collectValue += BASE_COLLECT_RATE * 0.72 * dt;
+      if (this.bot.collectValue >= this.bot.collecting.collectNeed) {
+        this.claimTrophyForBot(this.bot.collecting);
+        this.bot.collecting = null;
+      }
+      this.bot.y += (this.surfaceY(this.bot.x, this.bot.z) - this.bot.y) * (1 - Math.exp(-12 * dt));
+      return;
+    }
+    const lead = this.bot.z - this.player.z;
+    const targetSpeed = lead > 18
+      ? 0
+      : lead > 10
+        ? 2.2
+        : 5.6 + clamp(this.distance / 320, 0, 1.8);
     this.bot.speed += (targetSpeed - this.bot.speed) * (1 - Math.exp(-2.4 * dt));
-    this.bot.angle = Math.sin(this.time * 0.45) * 0.12;
-    this.bot.x = clamp(3.8 + Math.sin(this.time * 0.8) * 1.2, -this.trackWidth / 2 + 1.1, this.trackWidth / 2 - 1.1);
+    this.bot.targetX = nearbyTrophy?.x ?? (3.8 + Math.sin(this.time * 0.8) * 1.2);
+    const dx = clamp(this.bot.targetX - this.bot.x, -1, 1);
+    this.bot.angle = dx * 0.24 + Math.sin(this.time * 0.45) * 0.05;
+    this.bot.x = clamp(this.bot.x + dx * dt * 5.5, -this.trackWidth / 2 + 1.1, this.trackWidth / 2 - 1.1);
     this.bot.z = Math.max(5, this.bot.z + Math.cos(this.bot.angle) * this.bot.speed * dt);
-    if (this.bot.z < this.player.z - 12) this.bot.z = this.player.z - 8;
-    if (this.bot.z > this.player.z + 32) this.bot.z = this.player.z + 24;
-    this.bot.y += (this.surfaceY(this.bot.z) - this.bot.y) * (1 - Math.exp(-12 * dt));
-    this.bot.timer -= dt;
-    if (this.bot.timer > 0) return;
-    const gain = Math.round((Math.max(30, this.distance + 35) ** 1.15) * rand(0.18, 0.42));
-    this.bot.score += gain;
-    this.bot.money += gain;
-    this.bot.timer = rand(3.2, 6.8);
+    if (this.bot.z < this.player.z - 16) this.bot.z = this.player.z - 12;
+    this.bot.y += (this.surfaceY(this.bot.x, this.bot.z) - this.bot.y) * (1 - Math.exp(-12 * dt));
+  }
+
+  findBotTrophy() {
+    if (!this.bot) return null;
+    const candidates = this.trophiesWorld
+      .filter((trophy) => !trophy.collected && trophy.z >= this.bot.z - 1 && trophy.z <= this.bot.z + 18 && this.surfaceY(trophy.x, trophy.z) > 1)
+      .sort((a, b) => {
+        const da = Math.abs(a.z - this.bot.z) + Math.abs(a.x - this.bot.x) * 0.7;
+        const db = Math.abs(b.z - this.bot.z) + Math.abs(b.x - this.bot.x) * 0.7;
+        return da - db;
+      });
+    return candidates[0] ?? null;
+  }
+
+  claimTrophyForBot(trophy) {
+    if (!this.bot || trophy.collected) return;
+    trophy.collected = true;
+    this.claimedTrophyIds.add(trophy.id);
+    this.bot.score += trophy.value;
+    this.bot.money += trophy.value;
+    this.disposeTrophy(trophy);
+    this.callbacks.onStatus?.(`${this.bot.name} collected ${trophy.symbol}: +$${trophy.value}.`);
     this.checkWinner();
   }
 
@@ -996,10 +1063,21 @@ export class WaveRunnersGame {
     this.playerGroup.position.set(this.player.x, this.player.y, this.player.z);
     this.playerGroup.rotation.y = this.player.angle;
     const playerBox = this.player.box.setFromObject(this.playerGroup);
+    let botBox = null;
+    if (this.bot && this.remoteGroup?.visible) {
+      this.remoteGroup.position.set(this.bot.x, this.bot.y, this.bot.z);
+      this.remoteGroup.rotation.y = this.bot.angle;
+      botBox = this.bot.box.setFromObject(this.remoteGroup);
+    }
     for (const wave of this.waves) {
       wave.mesh.position.z -= wave.speed * dt;
       wave.mesh.scale.y = 1 + Math.sin(this.time * 12 + wave.mesh.position.z) * 0.06;
       wave.box.setFromObject(wave.mesh);
+      if (botBox && wave.box.intersectsBox(botBox)) {
+        if (!wave.type.harmless && this.bot.z >= 12 && !this.isBotSafeInTrench()) {
+          this.dieBot(wave.type.label);
+        }
+      }
       if (wave.box.intersectsBox(playerBox)) {
         if (wave.type.harmless) {
           this.callbacks.onStatus?.("WHITE wave passed. False alarm.");
@@ -1014,7 +1092,8 @@ export class WaveRunnersGame {
       }
     }
     this.waves = this.waves.filter((wave) => {
-      if (wave.mesh.position.z < this.player.z - 24) {
+      const trailingZ = Math.min(this.player.z, this.bot?.z ?? this.player.z);
+      if (wave.mesh.position.z < trailingZ - 24) {
         this.waveGroup.remove(wave.mesh);
         wave.mesh.geometry.dispose();
         wave.mesh.material.dispose();
@@ -1022,6 +1101,11 @@ export class WaveRunnersGame {
       }
       return true;
     });
+  }
+
+  isBotSafeInTrench() {
+    if (!this.bot) return false;
+    return this.surfaceY(this.bot.x, this.bot.z) < 1 && this.bot.y < 0.05;
   }
 
   die(label) {
@@ -1048,6 +1132,19 @@ export class WaveRunnersGame {
     this.nextWaveIn = 2.4;
   }
 
+  dieBot(label) {
+    if (!this.bot) return;
+    this.callbacks.onStatus?.(`${label} wave hit ${this.bot.name}. Bot is back at start.`);
+    this.bot.x = 3.8;
+    this.bot.y = 1.55;
+    this.bot.z = 5;
+    this.bot.angle = 0;
+    this.bot.speed = 0;
+    this.bot.targetX = 3.8;
+    this.bot.collecting = null;
+    this.bot.collectValue = 0;
+  }
+
   updateAnimation(dt) {
     this.animateCharacter(this.parts, this.player.grounded ? Math.abs(this.player.speed) : 0, 0);
     if (this.remoteGroup?.visible) {
@@ -1056,7 +1153,9 @@ export class WaveRunnersGame {
     }
     for (const trophy of this.trophiesWorld) {
       if (trophy.collected || !trophy.sprite || !trophy.priceSprite) continue;
-      const near = Math.hypot(trophy.x - this.player.x, trophy.z - this.player.z) < 3.2;
+      const nearPlayer = Math.hypot(trophy.x - this.player.x, trophy.z - this.player.z) < 3.2;
+      const nearBot = this.bot && Math.hypot(trophy.x - this.bot.x, trophy.z - this.bot.z) < 3.2;
+      const near = nearPlayer || nearBot;
       trophy.priceSprite.visible = near;
       trophy.sprite.position.y = 1.35 + Math.sin(this.time * 3 + trophy.z) * 0.12;
       trophy.priceSprite.position.y = 2.75 + Math.sin(this.time * 3 + trophy.z) * 0.06;
@@ -1125,7 +1224,7 @@ export class WaveRunnersGame {
     }
     this.updateInput(dt);
     this.updatePhysics(dt);
-    this.generateChunksAround(this.player.z);
+    this.generateChunksAround(this.player.z, this.bot?.z ?? this.player.z);
     this.updateBaseInteraction();
     this.updateCollecting(dt);
     this.updateBot(dt);
@@ -1146,6 +1245,7 @@ export class WaveRunnersGame {
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("resize", this.onResize);
+    window.visualViewport?.removeEventListener("resize", this.onResize);
     this.stickEl.removeEventListener("pointerdown", this.onPointerDown);
     this.stickEl.removeEventListener("pointermove", this.onPointerMove);
     this.stickEl.removeEventListener("pointerup", this.onPointerUp);

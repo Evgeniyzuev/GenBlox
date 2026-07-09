@@ -32,7 +32,14 @@ body {
 }
 
 button, a { font: inherit; }
-button { color: inherit; }
+button {
+  color: inherit;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
 button:focus-visible, a:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
 
 .topbar {
@@ -686,13 +693,26 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   overflow: hidden;
   background: #171525;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .wave-stage[hidden] { display: none; }
-.wave-canvas-host,
+.wave-canvas-host {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+}
 .wave-canvas-host canvas {
   display: block;
   width: 100%;
   height: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .wave-hud {
   position: absolute;
@@ -798,6 +818,9 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   align-items: end;
   padding: 0 max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
   pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .wave-stick {
   position: relative;
