@@ -2,6 +2,10 @@ import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const rand = (min, max) => min + Math.random() * (max - min);
+const PLAYER_MAX_SPEED = 8.7;
+const MAX_GREEN_SURFACE_RUN = 68;
+const GREEN_SAFETY_MARGIN = 1.2;
+const TROPHY_ITEMS = ["💎", "🍎", "🍌", "🍓", "🍕", "⚽", "🎧", "📱", "🧸", "🐱", "🐶", "🦊", "🦄", "🏆", "⭐", "🚀"];
 
 const PLAYER_STATES = {
   RUNNING: "RUNNING",
@@ -11,7 +15,13 @@ const PLAYER_STATES = {
 };
 
 const WAVE_TYPES = [
-  { id: "green", color: 0x5cff77, speed: 4.8, interval: 8.2, label: "GREEN" },
+  {
+    id: "green",
+    color: 0x5cff77,
+    speed: 4.8,
+    interval: MAX_GREEN_SURFACE_RUN / PLAYER_MAX_SPEED + GREEN_SAFETY_MARGIN,
+    label: "GREEN",
+  },
   { id: "yellow", color: 0xffd34d, speed: 13, interval: 4.5, label: "YELLOW" },
   { id: "red", color: 0xff4d68, speed: 18, interval: 3.1, label: "RED" },
 ];
@@ -30,6 +40,10 @@ export class WaveRunnersGame {
     this.bestDistance = 0;
     this.trophies = 0;
     this.lootValue = 0;
+    this.money = 0;
+    this.speedLevel = 0;
+    this.upgradeCost = 80;
+    this.wasActionPressed = false;
     this.collecting = null;
     this.deathFlash = 0;
     this.chunkLength = 34;
@@ -78,7 +92,8 @@ export class WaveRunnersGame {
     this.hud.className = "wave-hud";
     this.hud.innerHTML = `
       <div><small>DISTANCE</small><strong data-wave-distance>0 m</strong></div>
-      <div><small>TROPHIES</small><strong data-wave-trophies>0</strong></div>
+      <div><small>MONEY</small><strong data-wave-money>$0</strong></div>
+      <div><small>SPEED</small><strong data-wave-speed>1</strong></div>
       <div><small>STATE</small><strong data-wave-state>RUNNING</strong></div>
       <div class="wave-collect" data-wave-collect hidden><span></span></div>
       <div class="wave-controls">W/S move, A/D turn, Space jumps, E harvests. On phone use the stick and right buttons.</div>
@@ -96,7 +111,8 @@ export class WaveRunnersGame {
     this.overlay.className = "wave-reset";
     this.root.append(this.canvasHost, this.hud, this.touchControls, this.overlay);
     this.distanceEl = this.hud.querySelector("[data-wave-distance]");
-    this.trophiesEl = this.hud.querySelector("[data-wave-trophies]");
+    this.moneyEl = this.hud.querySelector("[data-wave-money]");
+    this.speedEl = this.hud.querySelector("[data-wave-speed]");
     this.stateEl = this.hud.querySelector("[data-wave-state]");
     this.collectEl = this.hud.querySelector("[data-wave-collect]");
     this.collectBar = this.collectEl.querySelector("span");
@@ -136,6 +152,10 @@ export class WaveRunnersGame {
       grass: new THREE.MeshStandardMaterial({ color: 0x5ea55d, roughness: 0.8 }),
       road: new THREE.MeshStandardMaterial({ color: 0xb9ac86, roughness: 0.85 }),
       trench: new THREE.MeshStandardMaterial({ color: 0x49352e, roughness: 0.95 }),
+      safe: new THREE.MeshStandardMaterial({ color: 0x86b36f, roughness: 0.8 }),
+      house: new THREE.MeshStandardMaterial({ color: 0xffd36a, roughness: 0.65 }),
+      roof: new THREE.MeshStandardMaterial({ color: 0xff668c, roughness: 0.7 }),
+      machine: new THREE.MeshStandardMaterial({ color: 0x63dcff, roughness: 0.45, emissive: 0x174556, emissiveIntensity: 0.25 }),
       playerBody: new THREE.MeshStandardMaterial({ color: 0x4aa7ff, roughness: 0.65 }),
       playerSkin: new THREE.MeshStandardMaterial({ color: 0xf0c18f, roughness: 0.7 }),
       playerHair: new THREE.MeshStandardMaterial({ color: 0x2b1f27, roughness: 0.75 }),
@@ -153,6 +173,9 @@ export class WaveRunnersGame {
     this.scene.add(this.waveGroup);
     this.trophyGroup = new THREE.Group();
     this.scene.add(this.trophyGroup);
+    this.houseTrophyGroup = new THREE.Group();
+    this.scene.add(this.houseTrophyGroup);
+    this.createBase();
     this.playerGroup = this.createPlayer();
     this.scene.add(this.playerGroup);
 
@@ -181,6 +204,72 @@ export class WaveRunnersGame {
       rightLeg: makePart("rightLeg", new THREE.Vector3(0.32, 0.95, 0.34), new THREE.Vector3(0.25, -0.6, 0), this.materials.playerBody),
     };
     return group;
+  }
+
+  createBase() {
+    this.baseGroup = new THREE.Group();
+    this.scene.add(this.baseGroup);
+    const safeStrip = new THREE.Mesh(new THREE.BoxGeometry(this.trackWidth, 0.5, 18), this.materials.safe);
+    safeStrip.position.set(0, 0.08, -4);
+    safeStrip.receiveShadow = true;
+    this.baseGroup.add(safeStrip);
+
+    const house = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 2.7, 3.6), this.materials.house);
+    body.position.set(0, 1.2, 0);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    house.add(body);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(3.2, 1.8, 4), this.materials.roof);
+    roof.position.set(0, 3.25, 0);
+    roof.rotation.y = Math.PI / 4;
+    roof.castShadow = true;
+    house.add(roof);
+    house.position.set(-11.5, 0.1, -7);
+    this.baseGroup.add(house);
+    this.baseGroup.add(this.createTextSprite("HOME", "#f8f7ff", "rgba(15,18,36,.72)", 1.9, 0.7, -11.5, 4.5, -7));
+
+    const machine = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3.2, 1.4), this.materials.machine);
+    machine.position.set(10.5, 1.55, -5.5);
+    machine.castShadow = true;
+    machine.receiveShadow = true;
+    this.baseGroup.add(machine);
+    this.upgradeLabel = this.createTextSprite(`SPEED $${this.upgradeCost}`, "#171525", "#b7f34a", 2.8, 0.8, 10.5, 3.7, -5.5);
+    this.baseGroup.add(this.upgradeLabel);
+  }
+
+  createTextSprite(text, color, background, width, height, x, y, z) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 96;
+    const context = canvas.getContext("2d");
+    context.fillStyle = background;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = color;
+    context.font = "900 34px Rubik, Arial, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(text, canvas.width / 2, canvas.height / 2);
+    const texture = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
+    sprite.scale.set(width, height, 1);
+    sprite.position.set(x, y, z);
+    return sprite;
+  }
+
+  createEmojiSprite(symbol, size = 1.35) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const context = canvas.getContext("2d");
+    context.font = "92px Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(symbol, 64, 67);
+    const texture = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
+    sprite.scale.set(size, size, 1);
+    return sprite;
   }
 
   bindEvents() {
@@ -295,8 +384,7 @@ export class WaveRunnersGame {
     }
     this.trophiesWorld = this.trophiesWorld.filter((trophy) => {
       if (trophy.z < z - 24 || trophy.collected) {
-        this.trophyGroup.remove(trophy.mesh);
-        trophy.mesh.geometry.dispose();
+        this.disposeTrophy(trophy);
         return false;
       }
       return true;
@@ -308,23 +396,34 @@ export class WaveRunnersGame {
     group.position.z = index * this.chunkLength;
     const difficulty = clamp(index / 28, 0, 1);
     const recentTrench = this.trenches.some((item) => item.chunk >= index - 1 && item.chunk < index);
-    const hasTrench = index > 0 && (Math.random() < 0.58 + difficulty * 0.22 || !recentTrench);
-    const trench = hasTrench ? this.createTrenchSpec(index) : null;
+    const forcedTrench = index > 0 && !recentTrench;
+    const hasTrench = index > 0 && (Math.random() < 0.58 + difficulty * 0.22 || forcedTrench);
+    const trench = hasTrench ? this.createTrenchSpec(index, forcedTrench) : null;
     if (trench) {
       this.trenches.push(trench);
     }
 
     const chunkStart = index * this.chunkLength;
-    const road = new THREE.Mesh(new THREE.BoxGeometry(this.trackWidth, 0.45, this.chunkLength), this.materials.road);
-    road.position.set(0, 0, this.chunkLength / 2);
-    road.receiveShadow = true;
-    group.add(road);
+    const addRoad = (centerX, centerZ, width, length) => {
+      if (width <= 0.2 || length <= 0.2) return;
+      const road = new THREE.Mesh(new THREE.BoxGeometry(width, 0.45, length), this.materials.road);
+      road.position.set(centerX, 0, centerZ);
+      road.receiveShadow = true;
+      group.add(road);
+    };
     if (trench) {
       const length = trench.z1 - trench.z0;
       const centerZ = (trench.z0 + trench.z1) / 2 - chunkStart;
-      const opening = new THREE.Mesh(new THREE.BoxGeometry(trench.width, 0.08, length), this.materials.trench);
-      opening.position.set(trench.x, 0.27, centerZ);
-      group.add(opening);
+      const localZ0 = trench.z0 - chunkStart;
+      const localZ1 = trench.z1 - chunkStart;
+      addRoad(0, localZ0 / 2, this.trackWidth, localZ0);
+      addRoad(0, (localZ1 + this.chunkLength) / 2, this.trackWidth, this.chunkLength - localZ1);
+      const trenchLeft = trench.x - trench.width / 2;
+      const trenchRight = trench.x + trench.width / 2;
+      const roadLeft = -this.trackWidth / 2;
+      const roadRight = this.trackWidth / 2;
+      addRoad((roadLeft + trenchLeft) / 2, centerZ, trenchLeft - roadLeft, length);
+      addRoad((trenchRight + roadRight) / 2, centerZ, roadRight - trenchRight, length);
       const floor = new THREE.Mesh(new THREE.BoxGeometry(trench.width, 0.35, length), this.materials.trench);
       floor.position.set(trench.x, trench.depth, centerZ);
       floor.receiveShadow = true;
@@ -341,49 +440,77 @@ export class WaveRunnersGame {
         lip.receiveShadow = true;
         group.add(lip);
       });
+    } else {
+      addRoad(0, this.chunkLength / 2, this.trackWidth, this.chunkLength);
     }
 
-    const trophyChance = clamp(0.5 - index * 0.006, 0.18, 0.5);
-    if (index > 1 && Math.random() < trophyChance) this.spawnTrophy(index, trench);
+    if (index > 1) {
+      const trophyCount = 2 + Math.floor(Math.random() * 4) + (Math.random() < 0.35 ? 2 : 0);
+      const rowZ = chunkStart + rand(8, this.chunkLength - 8);
+      for (let item = 0; item < trophyCount; item += 1) {
+        const parallel = item < 4 && Math.random() < 0.72;
+        this.spawnTrophy(index, trench, parallel ? rowZ + rand(-1.4, 1.4) : null);
+      }
+    }
     this.trackGroup.add(group);
     this.chunks.set(index, group);
   }
 
-  createTrenchSpec(index) {
+  createTrenchSpec(index, forced = false) {
     const chunkStart = index * this.chunkLength;
     const roll = Math.random();
     const width = roll < 0.28 ? rand(26, 32) : roll < 0.62 ? rand(9, 15) : rand(13, 22);
     const sideSpan = this.trackWidth / 2 - width / 2 - 1;
     const x = width > this.trackWidth * 0.72 ? 0 : rand(-sideSpan, sideSpan);
-    const length = roll < 0.35 ? rand(4.5, 7.5) : roll < 0.72 ? rand(8, 12) : rand(13, 17);
-    const z0 = chunkStart + rand(5, this.chunkLength - length - 4);
+    const length = forced ? rand(9, 14) : roll < 0.35 ? rand(4.5, 7.5) : roll < 0.72 ? rand(8, 12) : rand(13, 17);
+    const maxStart = forced ? Math.min(9, this.chunkLength - length - 4) : this.chunkLength - length - 4;
+    const z0 = chunkStart + rand(5, maxStart);
     return {
       chunk: index,
       x,
       z0,
       z1: z0 + length,
       width,
-      depth: rand(-2.35, -1.95),
+      depth: rand(-1.72, -1.48),
     };
   }
 
-  spawnTrophy(index, trench) {
+  spawnTrophy(index, trench, preferredZ = null) {
     const chunkStart = index * this.chunkLength;
-    let z = chunkStart + rand(5, this.chunkLength - 5);
+    let z = preferredZ ?? chunkStart + rand(5, this.chunkLength - 5);
     if (trench && z > trench.z0 - 2 && z < trench.z1 + 2) {
       z = Math.random() < 0.5 ? trench.z0 - 3 : trench.z1 + 3;
     }
-    const value = 10 + Math.floor(index * 1.7);
-    const geometry = new THREE.OctahedronGeometry(0.45, 0);
-    const mesh = new THREE.Mesh(geometry, this.materials.trophy);
+    const distanceValue = Math.max(1, Math.floor(z / 12));
+    const randomMultiplier = rand(0.55, 4.8);
+    const value = Math.max(5, Math.round((8 + distanceValue * 3.4) * randomMultiplier));
+    const symbol = TROPHY_ITEMS[Math.floor(Math.random() * TROPHY_ITEMS.length)];
+    const sprite = this.createEmojiSprite(symbol, 1.25 + clamp(value / 300, 0, 0.45));
     let x = rand(-this.trackWidth / 2 + 2.5, this.trackWidth / 2 - 2.5);
     if (trench && z >= trench.z0 - 1 && z <= trench.z1 + 1 && Math.abs(x - trench.x) < trench.width / 2 + 1.2) {
       x = trench.x < 0 ? rand(2.5, this.trackWidth / 2 - 2.5) : rand(-this.trackWidth / 2 + 2.5, -2.5);
     }
-    mesh.position.set(x, 1.1, z);
-    mesh.castShadow = true;
-    this.trophyGroup.add(mesh);
-    this.trophiesWorld.push({ mesh, x: mesh.position.x, z, value, progress: 0, collected: false });
+    sprite.position.set(x, 1.35, z);
+    this.trophyGroup.add(sprite);
+    const priceSprite = this.createTextSprite(`$${value}`, "#171525", "rgba(183,243,74,.92)", 1.75, 0.55, x, 2.75, z);
+    priceSprite.visible = false;
+    this.trophyGroup.add(priceSprite);
+    this.trophiesWorld.push({ sprite, priceSprite, symbol, x: sprite.position.x, z, value, progress: 0, collected: false });
+  }
+
+  disposeTrophy(trophy) {
+    if (trophy.sprite) {
+      this.trophyGroup.remove(trophy.sprite);
+      trophy.sprite.material.map?.dispose();
+      trophy.sprite.material.dispose();
+      trophy.sprite = null;
+    }
+    if (trophy.priceSprite) {
+      this.trophyGroup.remove(trophy.priceSprite);
+      trophy.priceSprite.material.map?.dispose();
+      trophy.priceSprite.material.dispose();
+      trophy.priceSprite = null;
+    }
   }
 
   currentTrench(z) {
@@ -415,14 +542,14 @@ export class WaveRunnersGame {
   }
 
   updateInput(dt) {
-    const left = this.keys.has("a") || this.keys.has("arrowleft");
-    const right = this.keys.has("d") || this.keys.has("arrowright");
+    const left = this.keys.has("a") || this.keys.has("arrowright");
+    const right = this.keys.has("d") || this.keys.has("arrowleft");
     const forward = this.keys.has("w") || this.keys.has("arrowup");
     const back = this.keys.has("s") || this.keys.has("arrowdown");
     const harvest = this.keys.has("e") || this.mobileInput.action;
     const turn = (right ? 1 : 0) - (left ? 1 : 0) + this.mobileInput.x;
     const throttle = (forward ? 1 : 0) - (back ? 0.35 : 0) + clamp(-this.mobileInput.y, -0.35, 1);
-    const targetSpeed = throttle > 0.05 ? 8.7 * clamp(throttle, 0, 1) : throttle < -0.05 ? -2.5 : 0;
+    const targetSpeed = throttle > 0.05 ? this.currentMaxSpeed() * clamp(throttle, 0, 1) : throttle < -0.05 ? -2.5 : 0;
     this.player.angle += clamp(turn, -1, 1) * 2.65 * dt;
     this.player.speed += (targetSpeed - this.player.speed) * (1 - Math.exp(-7 * dt));
     this.player.x = clamp(this.player.x + Math.sin(this.player.angle) * this.player.speed * dt, -this.trackWidth / 2 + 1.1, this.trackWidth / 2 - 1.1);
@@ -432,6 +559,10 @@ export class WaveRunnersGame {
     }
     this.lastInputMove = Math.abs(turn) + Math.abs(this.player.speed);
     if (!harvest || this.lastInputMove > 0.4 || !this.player.grounded || this.player.inTrench) this.cancelCollect();
+  }
+
+  currentMaxSpeed() {
+    return PLAYER_MAX_SPEED + this.speedLevel * 0.65;
   }
 
   updatePhysics(dt) {
@@ -456,6 +587,7 @@ export class WaveRunnersGame {
   updateCollecting(dt) {
     if (this.collecting?.collected) this.collecting = null;
     const harvest = this.keys.has("e") || this.mobileInput.action;
+    if (this.isNearUpgradeMachine()) return;
     if (!harvest || !this.player.grounded || this.player.inTrench || this.lastInputMove > 0.4) return;
     const trophy = this.collecting ?? this.trophiesWorld.find((item) => Math.hypot(item.x - this.player.x, item.z - this.player.z) < 1.45);
     if (!trophy) return;
@@ -465,10 +597,46 @@ export class WaveRunnersGame {
       trophy.collected = true;
       this.trophies += 1;
       this.lootValue += trophy.value;
-      this.trophyGroup.remove(trophy.mesh);
-      this.callbacks.onStatus?.(`Trophy claimed: +${trophy.value}. Total value ${this.lootValue}.`);
+      this.money += trophy.value;
+      this.disposeTrophy(trophy);
+      this.spawnHouseTrophy(trophy.symbol);
+      this.callbacks.onStatus?.(`${trophy.symbol} claimed: +$${trophy.value}.`);
       this.collecting = null;
     }
+  }
+
+  isNearUpgradeMachine() {
+    return Math.hypot(this.player.x - 10.5, this.player.z + 5.5) < 3.2 && this.player.grounded && !this.player.inTrench;
+  }
+
+  updateBaseInteraction() {
+    const action = this.keys.has("e") || this.mobileInput.action;
+    if (action && !this.wasActionPressed && this.isNearUpgradeMachine()) {
+      if (this.money >= this.upgradeCost) {
+        this.money -= this.upgradeCost;
+        this.speedLevel += 1;
+        this.upgradeCost = Math.round(this.upgradeCost * 1.75 + 35);
+        this.baseGroup.remove(this.upgradeLabel);
+        this.upgradeLabel.material.map?.dispose();
+        this.upgradeLabel.material.dispose();
+        this.upgradeLabel = this.createTextSprite(`SPEED $${this.upgradeCost}`, "#171525", "#b7f34a", 2.8, 0.8, 10.5, 3.7, -5.5);
+        this.baseGroup.add(this.upgradeLabel);
+        this.callbacks.onStatus?.(`Speed upgraded to level ${this.speedLevel + 1}.`);
+      } else {
+        this.callbacks.onStatus?.(`Need $${this.upgradeCost} for the next speed upgrade.`);
+      }
+      this.cancelCollect();
+    }
+    this.wasActionPressed = action;
+  }
+
+  spawnHouseTrophy(symbol) {
+    const sprite = this.createEmojiSprite(symbol, 0.82);
+    const index = this.houseTrophyGroup.children.length;
+    const column = index % 6;
+    const row = Math.floor(index / 6) % 4;
+    sprite.position.set(-14 + column * 0.95, 1.25 + row * 0.62, -3.9);
+    this.houseTrophyGroup.add(sprite);
   }
 
   cancelCollect() {
@@ -488,7 +656,9 @@ export class WaveRunnersGame {
       wave.mesh.scale.y = 1 + Math.sin(this.time * 12 + wave.mesh.position.z) * 0.06;
       wave.box.setFromObject(wave.mesh);
       if (wave.box.intersectsBox(playerBox)) {
-        if (this.player.inTrench && this.player.y < 0.05) {
+        if (this.player.z < 12) {
+          this.callbacks.onStatus?.("Safe at home.");
+        } else if (this.player.inTrench && this.player.y < 0.05) {
           this.callbacks.onStatus?.(`${wave.type.label} wave passed overhead.`);
         } else {
           this.die(wave.type.label);
@@ -540,8 +710,11 @@ export class WaveRunnersGame {
     this.parts.rightLeg.rotation.x = swing * 0.95;
     this.parts.head.rotation.y = Math.sin(this.time * 2.2) * 0.08;
     for (const trophy of this.trophiesWorld) {
-      trophy.mesh.rotation.y += dt * 2.4;
-      trophy.mesh.position.y = 1.1 + Math.sin(this.time * 3 + trophy.z) * 0.12;
+      if (trophy.collected || !trophy.sprite || !trophy.priceSprite) continue;
+      const near = Math.hypot(trophy.x - this.player.x, trophy.z - this.player.z) < 3.2;
+      trophy.priceSprite.visible = near;
+      trophy.sprite.position.y = 1.35 + Math.sin(this.time * 3 + trophy.z) * 0.12;
+      trophy.priceSprite.position.y = 2.75 + Math.sin(this.time * 3 + trophy.z) * 0.06;
     }
   }
 
@@ -561,7 +734,8 @@ export class WaveRunnersGame {
   updateHud() {
     this.distance = Math.max(this.distance, Math.floor(this.player.z));
     this.distanceEl.textContent = `${Math.floor(this.distance)} m`;
-    this.trophiesEl.textContent = `${this.trophies} / ${this.lootValue}`;
+    this.moneyEl.textContent = `$${this.money}`;
+    this.speedEl.textContent = `${this.speedLevel + 1} (${this.currentMaxSpeed().toFixed(1)})`;
     this.player.state = this.collecting
       ? PLAYER_STATES.COLLECTING
       : !this.player.grounded
@@ -583,6 +757,7 @@ export class WaveRunnersGame {
     this.updateInput(dt);
     this.updatePhysics(dt);
     this.generateChunksAround(this.player.z);
+    this.updateBaseInteraction();
     this.updateCollecting(dt);
     this.updateWaves(dt);
     this.updateAnimation(dt);
