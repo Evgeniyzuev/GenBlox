@@ -785,7 +785,7 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   inset: 0;
   z-index: 11;
   display: grid;
-  grid-template-columns: repeat(3, minmax(96px, 180px));
+  grid-template-columns: repeat(2, minmax(220px, 360px));
   align-content: center;
   justify-content: center;
   gap: 14px;
@@ -802,12 +802,51 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   text-align: center;
 }
 .wave-goal-choice button {
-  min-height: 68px;
+  min-height: 48px;
   border: 1px solid rgba(255,255,255,.18);
   color: #171525;
   background: var(--lime);
   cursor: pointer;
   font-weight: 900;
+}
+.wave-map-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(23,21,37,.82);
+}
+.wave-map-card b {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 900;
+}
+.wave-map-card small {
+  min-height: 28px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+.wave-map-preview {
+  display: block;
+  min-height: 96px;
+  border: 1px solid rgba(255,255,255,.12);
+  background:
+    linear-gradient(90deg, transparent 0 18%, rgba(49,65,91,.9) 19% 31%, transparent 32% 100%),
+    radial-gradient(circle at 68% 38%, rgba(255,213,79,.95) 0 4%, transparent 5%),
+    linear-gradient(#5ea55d, #5ea55d);
+}
+.wave-map-preview.is-tidal {
+  background:
+    linear-gradient(72deg, transparent 0 38%, rgba(49,65,91,.95) 39% 48%, transparent 49% 100%),
+    linear-gradient(108deg, transparent 0 12%, rgba(49,65,91,.75) 13% 22%, transparent 23% 100%),
+    radial-gradient(circle at 68% 38%, rgba(255,213,79,.95) 0 4%, transparent 5%),
+    linear-gradient(#3f8a70, #3f8a70);
+}
+.wave-targets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
 }
 .wave-touch {
   position: absolute;
@@ -967,6 +1006,9 @@ footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--mut
   .card-preview { min-height: 220px; }
   .card-copy { padding: 28px; }
   .party-panel { grid-template-columns: 1fr; gap: 8px; }
+  .wave-goal-choice { grid-template-columns: minmax(220px, 1fr); overflow: auto; align-content: start; padding-top: 72px; }
+  .wave-map-preview { min-height: 74px; }
+  .wave-targets { grid-template-columns: 1fr; }
   .wave-touch { display: flex; }
 }
 

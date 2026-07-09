@@ -1,4 +1,5 @@
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { RealtimeSnapshotChannel, TimedEventQueue } from "../core/realtime-netcode.js";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const rand = (min, max) => min + Math.random() * (max - min);
@@ -23,13 +24,18 @@ const GREEN_SAFETY_MARGIN = 1.2;
 const BASE_COLLECT_RATE = 76;
 const COLLECT_RADIUS = 2.175;
 const MATCH_TARGETS = [20000, 50000, 100000];
+const MAX_ACTIVE_TROPHIES = 180;
+const TROPHY_RESPAWN_INTERVAL = 30;
+const WAVE_QUEUE_SECONDS = 30;
 const TROPHY_TIERS = [
-  { max: 500, items: ["🍎", "🍌", "🍓"] },
-  { max: 1000, items: ["🍕", "⚽", "🎧"] },
-  { max: 2000, items: ["📱", "🧸", "⭐"] },
-  { max: 4000, items: ["🐱", "🐶", "🦊"] },
-  { max: 8000, items: ["🦄", "💎", "🏆"] },
-  { max: Infinity, items: ["🚀", "👑", "🌌"] },
+  { max: 500, items: ["🥦", "🥕", "🧅"] },
+  { max: 1000, items: ["🍇", "🍌", "🍓"] },
+  { max: 2000, items: ["🍕", "🍔", "🍟"] },
+  { max: 3000, items: ["⚽️", "🏀", "🎯"] },
+  { max: 5000, items: ["📱", "🎧", "👩‍💻"] },
+  { max: 8000, items: ["🦄", "🦊", "🐶"] },
+  { max: 12000, items: ["🥇", "💎", "🏆"] },
+  { max: Infinity, items: ["💵", "👑", "🎁"] },
 ];
 
 const PLAYER_STATES = {
@@ -63,6 +69,43 @@ const WAVE_TYPES = [
   { id: "red", color: 0xff4d68, speed: 18, interval: 3.1, label: "RED" },
 ];
 const waveTypeById = (id) => WAVE_TYPES.find((type) => type.id === id) ?? WAVE_TYPES[1];
+const WAVE_MAPS = [
+  {
+    id: "meadow",
+    title: "Meadow Run",
+    subtitle: "Open grass, shorter sightlines, classic wave timing",
+    sky: 0x8fc7e8,
+    fog: 0x8fc7e8,
+    grass: 0x5ea55d,
+    road: 0xb9ac86,
+    trench: 0x49352e,
+    safe: 0x86b36f,
+    seedOffset: 17,
+    waveSpeedMultiplier: 1,
+    waveIntervalMultiplier: 1,
+    waveLeadMultiplier: 1,
+    trenchBias: 0,
+    trenchShift: 0,
+  },
+  {
+    id: "tidal",
+    title: "Tidal Flats",
+    subtitle: "Offset ravines, cooler terrain, faster waves with longer gaps",
+    sky: 0xa9d6d2,
+    fog: 0xa9d6d2,
+    grass: 0x3f8a70,
+    road: 0xc7b98f,
+    trench: 0x31415b,
+    safe: 0x75b7a0,
+    seedOffset: 4409,
+    waveSpeedMultiplier: 1.2,
+    waveIntervalMultiplier: 1.2,
+    waveLeadMultiplier: 1.2,
+    trenchBias: 0.12,
+    trenchShift: 0.65,
+  },
+];
+const waveMapById = (id) => WAVE_MAPS.find((map) => map.id === id) ?? WAVE_MAPS[0];
 
 export class WaveRunnersGame {
   constructor(root, callbacks = {}) {
@@ -105,8 +148,10 @@ export class WaveRunnersGame {
       box: new THREE.Box3(),
     };
     this.network = callbacks.network ?? null;
-    this.networkRole = this.network?.role ?? "solo";
-    this.playerId = this.network?.playerId ?? "solo";
+    this.netcode = new RealtimeSnapshotChannel({ network: this.network, kind: "wave-runners", playerId: "solo" });
+    this.networkRole = this.netcode.role;
+    this.playerId = this.netcode.playerId;
+    this.selectedMap = WAVE_MAPS[0];
     this.money = 0;
     this.speedLevel = 0;
     this.collectRateLevel = 0;
@@ -120,12 +165,15 @@ export class WaveRunnersGame {
     this.chunks = new Map();
     this.trenches = [];
     this.trophiesWorld = [];
-    this.trophyRespawns = [];
-    this.scheduledRespawnIds = new Set();
+    this.trophyStock = new Map();
     this.claimedTrophyIds = new Set();
     this.pendingClaimId = null;
     this.waves = [];
     this.nextWaveIn = 2.8;
+    this.waveQueue = new TimedEventQueue({ horizon: WAVE_QUEUE_SECONDS, disconnectGrace: WAVE_QUEUE_SECONDS });
+    this.waveSerial = 0;
+    this.lastWaveEventAt = 0;
+    this.networkQueueExpired = false;
     this.networkClock = 0;
     this.remoteRanking = [];
     this.remotePose = null;
@@ -213,8 +261,8 @@ export class WaveRunnersGame {
 
   buildScene() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x8fc7e8);
-    this.scene.fog = new THREE.Fog(0x8fc7e8, 70, 230);
+    this.scene.background = new THREE.Color(this.selectedMap.sky);
+    this.scene.fog = new THREE.Fog(this.selectedMap.fog, 70, 230);
 
     this.camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 360);
     this.camera.position.set(0, 8, -12);
@@ -238,10 +286,10 @@ export class WaveRunnersGame {
     this.scene.add(sun);
 
     this.materials = {
-      grass: new THREE.MeshStandardMaterial({ color: 0x5ea55d, roughness: 0.8 }),
-      road: new THREE.MeshStandardMaterial({ color: 0xb9ac86, roughness: 0.85 }),
-      trench: new THREE.MeshStandardMaterial({ color: 0x49352e, roughness: 0.95 }),
-      safe: new THREE.MeshStandardMaterial({ color: 0x86b36f, roughness: 0.8 }),
+      grass: new THREE.MeshStandardMaterial({ color: this.selectedMap.grass, roughness: 0.8 }),
+      road: new THREE.MeshStandardMaterial({ color: this.selectedMap.road, roughness: 0.85 }),
+      trench: new THREE.MeshStandardMaterial({ color: this.selectedMap.trench, roughness: 0.95 }),
+      safe: new THREE.MeshStandardMaterial({ color: this.selectedMap.safe, roughness: 0.8 }),
       house: new THREE.MeshStandardMaterial({ color: 0xffd36a, roughness: 0.65 }),
       roof: new THREE.MeshStandardMaterial({ color: 0xff668c, roughness: 0.7 }),
       machine: new THREE.MeshStandardMaterial({ color: 0x63dcff, roughness: 0.45, emissive: 0x174556, emissiveIntensity: 0.25 }),
@@ -343,23 +391,74 @@ export class WaveRunnersGame {
   }
 
   buildGoalChoice() {
-    this.goalChoice.innerHTML = "<strong>PLAY TO</strong>";
-    MATCH_TARGETS.forEach((target) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = `$${target.toLocaleString("en-US")}`;
-      button.addEventListener("click", () => this.startMatch(target));
-      this.goalChoice.append(button);
+    this.goalChoice.innerHTML = "<strong>CHOOSE RUN</strong>";
+    WAVE_MAPS.forEach((map) => {
+      const card = document.createElement("article");
+      card.className = "wave-map-card";
+      const preview = document.createElement("span");
+      preview.className = `wave-map-preview is-${map.id}`;
+      const title = document.createElement("b");
+      title.textContent = map.title;
+      const subtitle = document.createElement("small");
+      subtitle.textContent = map.subtitle;
+      const targets = document.createElement("div");
+      targets.className = "wave-targets";
+      MATCH_TARGETS.forEach((target) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = `$${target.toLocaleString("en-US")}`;
+        button.addEventListener("click", () => this.startMatch(target, map.id));
+        targets.append(button);
+      });
+      card.append(preview, title, subtitle, targets);
+      this.goalChoice.append(card);
     });
   }
 
-  startMatch(targetScore = MATCH_TARGETS[0], publish = true) {
+  startMatch(targetScore = MATCH_TARGETS[0], mapId = this.selectedMap.id, publish = true) {
+    this.applyMap(mapId);
     this.targetScore = targetScore;
     this.phase = "playing";
     this.winner = null;
     this.goalChoice.hidden = true;
-    this.callbacks.onStatus?.(`First to $${targetScore.toLocaleString("en-US")} wins.`);
+    this.callbacks.onStatus?.(`${this.selectedMap.title}: first to $${targetScore.toLocaleString("en-US")} wins.`);
     if (publish && this.networkRole === "host") this.publishSnapshot(true);
+  }
+
+  applyMap(mapId) {
+    const map = waveMapById(mapId);
+    if (this.selectedMap.id === map.id) return;
+    this.selectedMap = map;
+    this.scene.background = new THREE.Color(map.sky);
+    this.scene.fog = new THREE.Fog(map.fog, 70, 230);
+    this.materials.grass.color.setHex(map.grass);
+    this.materials.road.color.setHex(map.road);
+    this.materials.trench.color.setHex(map.trench);
+    this.materials.safe.color.setHex(map.safe);
+    this.resetWorldGeometry();
+  }
+
+  resetWorldGeometry() {
+    for (const group of this.chunks.values()) {
+      this.trackGroup.remove(group);
+      this.disposeObject3D(group, false);
+    }
+    this.chunks.clear();
+    this.trenches = [];
+    this.trophyStock.clear();
+    this.trophiesWorld.forEach((trophy) => this.disposeTrophy(trophy));
+    this.trophiesWorld = [];
+    for (const wave of this.waves) {
+      this.waveGroup.remove(wave.mesh);
+      wave.mesh.geometry.dispose();
+      wave.mesh.material.dispose();
+    }
+    this.waves = [];
+    this.waveQueue = new TimedEventQueue({ horizon: WAVE_QUEUE_SECONDS, disconnectGrace: WAVE_QUEUE_SECONDS });
+    this.waveSerial = 0;
+    this.lastWaveEventAt = 0;
+    this.nextWaveIn = 2.8;
+    this.generateChunksAround(this.player.z, this.bot?.z ?? this.player.z);
   }
 
   createUpgradeMachine(x, z, label, cost, color) {
@@ -512,6 +611,25 @@ export class WaveRunnersGame {
     this.stickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
 
+  disposeObject3D(object, disposeMaterials = true) {
+    const geometries = new Set();
+    const materialsSeen = new Set();
+    object.traverse?.((child) => {
+      if (child.geometry && !geometries.has(child.geometry)) {
+        geometries.add(child.geometry);
+        child.geometry.dispose?.();
+      }
+      if (!disposeMaterials) return;
+      const materials = Array.isArray(child.material) ? child.material : child.material ? [child.material] : [];
+      materials.forEach((material) => {
+        if (materialsSeen.has(material)) return;
+        materialsSeen.add(material);
+        material.map?.dispose?.();
+        material.dispose?.();
+      });
+    });
+  }
+
   generateChunksAround(z, extraZ = z) {
     const current = Math.floor(z / this.chunkLength);
     const extraCurrent = Math.floor(extraZ / this.chunkLength);
@@ -525,11 +643,10 @@ export class WaveRunnersGame {
     for (const [index, group] of this.chunks.entries()) {
       if (index < earliest - 4 || index > latest + 16) {
         this.trackGroup.remove(group);
-        group.traverse((child) => {
-          child.geometry?.dispose?.();
-        });
+        this.disposeObject3D(group, false);
         this.chunks.delete(index);
         this.trenches = this.trenches.filter((trench) => trench.chunk !== index);
+        this.trophyStock.delete(index);
       }
     }
     const trailingZ = Math.min(z, extraZ);
@@ -545,12 +662,12 @@ export class WaveRunnersGame {
   createChunk(index) {
     const group = new THREE.Group();
     group.position.z = index * this.chunkLength;
-    const rng = seededRandom(index * 99991 + 17);
+    const rng = seededRandom(index * 99991 + this.selectedMap.seedOffset);
     const r = (min, max) => min + rng() * (max - min);
     const difficulty = clamp(index / 28, 0, 1);
     const recentTrench = this.trenches.some((item) => item.chunk >= index - 1 && item.chunk < index);
     const forcedTrench = index > 0 && !recentTrench;
-    const hasTrench = index > 0 && (rng() < 0.58 + difficulty * 0.22 || forcedTrench);
+    const hasTrench = index > 0 && (rng() < 0.58 + this.selectedMap.trenchBias + difficulty * 0.22 || forcedTrench);
     const trench = hasTrench ? this.createTrenchSpec(index, forcedTrench, rng) : null;
     if (trench) {
       this.trenches.push(trench);
@@ -600,11 +717,16 @@ export class WaveRunnersGame {
     if (index > 1) {
       const baseTrophyCount = 2 + Math.floor(rng() * 4) + (rng() < 0.35 ? 2 : 0);
       const trophyCount = Math.max(2, Math.round(baseTrophyCount * 1.2));
+      const before = this.trophiesWorld.length;
       const rowZ = chunkStart + r(8, this.chunkLength - 8);
       for (let item = 0; item < trophyCount; item += 1) {
         const parallel = item < 5 && rng() < 0.72;
         this.spawnTrophy(index, trench, parallel ? rowZ + r(-1.4, 1.4) : null, rng);
       }
+      this.trophyStock.set(index, {
+        initial: Math.max(0, this.trophiesWorld.length - before),
+        lastRespawn: this.time,
+      });
     }
     this.trackGroup.add(group);
     this.chunks.set(index, group);
@@ -614,10 +736,12 @@ export class WaveRunnersGame {
     const r = (min, max) => min + rng() * (max - min);
     const chunkStart = index * this.chunkLength;
     const roll = rng();
-    const width = roll < 0.28 ? r(26, 32) : roll < 0.62 ? r(9, 15) : r(13, 22);
+    const shiftedRoll = (roll + this.selectedMap.trenchShift) % 1;
+    const width = shiftedRoll < 0.28 ? r(26, 32) : shiftedRoll < 0.62 ? r(9, 15) : r(13, 22);
     const sideSpan = this.trackWidth / 2 - width / 2 - 1;
-    const x = width > this.trackWidth * 0.72 ? 0 : r(-sideSpan, sideSpan);
-    const length = forced ? r(9, 14) : roll < 0.35 ? r(4.5, 7.5) : roll < 0.72 ? r(8, 12) : r(13, 17);
+    const laneBias = this.selectedMap.id === "tidal" ? Math.sin(index * 1.9) * sideSpan * 0.45 : 0;
+    const x = width > this.trackWidth * 0.72 ? 0 : clamp(r(-sideSpan, sideSpan) + laneBias, -sideSpan, sideSpan);
+    const length = forced ? r(9, 14) : shiftedRoll < 0.35 ? r(5.5, 8.5) : shiftedRoll < 0.72 ? r(8.5, 13) : r(12, 18);
     const maxStart = forced ? Math.min(9, this.chunkLength - length - 4) : this.chunkLength - length - 4;
     const z0 = chunkStart + r(5, maxStart);
     return {
@@ -631,6 +755,7 @@ export class WaveRunnersGame {
   }
 
   spawnTrophy(index, trench, preferredZ = null, rng = Math.random, idSuffix = "") {
+    if (this.trophiesWorld.length >= MAX_ACTIVE_TROPHIES) return null;
     const r = (min, max) => min + rng() * (max - min);
     const chunkStart = index * this.chunkLength;
     let z = preferredZ ?? chunkStart + r(5, this.chunkLength - 5);
@@ -681,28 +806,23 @@ export class WaveRunnersGame {
     }
   }
 
-  scheduleTrophyRespawn(trophy) {
-    if (!trophy || trophy.chunk <= 1 || this.scheduledRespawnIds.has(trophy.id)) return;
-    this.scheduledRespawnIds.add(trophy.id);
-    const rng = seededRandom(hashString(trophy.id));
-    this.trophyRespawns.push({
-      sourceId: trophy.id,
-      chunk: trophy.chunk,
-      at: this.time + 3.6 + rng() * 4.4,
-    });
-  }
-
   updateTrophyRespawns() {
-    this.trophyRespawns = this.trophyRespawns.filter((respawn) => {
-      if (this.time < respawn.at) return true;
-      if (!this.chunks.has(respawn.chunk)) return true;
-      const rng = seededRandom(hashString(respawn.sourceId));
-      const trench = this.trenches.find((item) => item.chunk === respawn.chunk) ?? null;
-      const chunkStart = respawn.chunk * this.chunkLength;
-      const z = chunkStart + 5 + rng() * (this.chunkLength - 10);
-      this.spawnTrophy(respawn.chunk, trench, z, rng, `:r${hashString(respawn.sourceId).toString(36)}`);
-      return false;
-    });
+    for (const [chunk, stock] of this.trophyStock.entries()) {
+      if (!this.chunks.has(chunk) || chunk <= 1 || stock.initial <= 0) continue;
+      if (this.time - stock.lastRespawn < TROPHY_RESPAWN_INTERVAL) continue;
+      stock.lastRespawn = this.time;
+      const active = this.trophiesWorld.filter((trophy) => trophy.chunk === chunk && !trophy.collected).length;
+      if (active >= stock.initial || this.trophiesWorld.length >= MAX_ACTIVE_TROPHIES) continue;
+      const amount = active < stock.initial / 2 ? 2 : 1;
+      const trench = this.trenches.find((item) => item.chunk === chunk) ?? null;
+      for (let index = 0; index < amount && this.trophiesWorld.length < MAX_ACTIVE_TROPHIES; index += 1) {
+        const seed = hashString(`${this.selectedMap.id}:${chunk}:${Math.floor(this.time / TROPHY_RESPAWN_INTERVAL)}:${index}`);
+        const rng = seededRandom(seed);
+        const chunkStart = chunk * this.chunkLength;
+        const z = chunkStart + 5 + rng() * (this.chunkLength - 10);
+        this.spawnTrophy(chunk, trench, z, rng, `:r${seed.toString(36)}`);
+      }
+    }
   }
 
   currentTrench(x, z) {
@@ -713,7 +833,7 @@ export class WaveRunnersGame {
     return this.currentTrench(x, z)?.depth ?? 1.55;
   }
 
-  spawnWave() {
+  makeWaveEvent(at) {
     const frontZ = Math.max(this.player.z, this.bot?.z ?? this.player.z);
     const difficulty = clamp(Math.max(this.distance, frontZ) / 650, 0, 1);
     const roll = Math.random();
@@ -724,9 +844,31 @@ export class WaveRunnersGame {
         : roll < 0.86 - difficulty * 0.08
           ? WAVE_TYPES[2]
           : WAVE_TYPES[3];
-    const speed = type.speed + (type.harmless ? difficulty * 2.5 : difficulty * 7);
-    this.createWaveMesh(type, frontZ + 150, speed, `${Math.floor(this.time * 1000)}:${type.id}:${this.waves.length}`);
-    this.nextWaveIn = Math.max(1.45, (type.interval - difficulty * 1.55) * rand(0.7, 1.3));
+    const speed = (type.speed + (type.harmless ? difficulty * 2.5 : difficulty * 7)) * this.selectedMap.waveSpeedMultiplier;
+    this.waveSerial += 1;
+    return {
+      id: `${this.selectedMap.id}:${Math.floor(at * 1000)}:${this.waveSerial}:${type.id}`,
+      at: Number(at.toFixed(3)),
+      type: type.id,
+      speed: Number(speed.toFixed(3)),
+      lead: Number((150 * this.selectedMap.waveLeadMultiplier).toFixed(2)),
+    };
+  }
+
+  nextWaveDelay() {
+    const frontZ = Math.max(this.player.z, this.bot?.z ?? this.player.z);
+    const difficulty = clamp(Math.max(this.distance, frontZ) / 650, 0, 1);
+    const basis = WAVE_TYPES[1 + Math.floor(Math.random() * (WAVE_TYPES.length - 1))];
+    return Math.max(1.45, (basis.interval - difficulty * 1.55) * this.selectedMap.waveIntervalMultiplier * rand(0.7, 1.3));
+  }
+
+  spawnWave(event = null) {
+    const waveEvent = event ?? this.makeWaveEvent(this.time);
+    const frontZ = Math.max(this.player.z, this.bot?.z ?? this.player.z);
+    const type = waveTypeById(waveEvent.type);
+    this.createWaveMesh(type, frontZ + (waveEvent.lead ?? 150 * this.selectedMap.waveLeadMultiplier), waveEvent.speed, waveEvent.id);
+    this.lastWaveEventAt = Math.max(this.lastWaveEventAt, waveEvent.at ?? this.time);
+    this.nextWaveIn = this.nextWaveDelay();
   }
 
   createWaveMesh(type, z, speed, id) {
@@ -812,7 +954,6 @@ export class WaveRunnersGame {
       this.lootValue += trophy.value;
       this.totalScore += trophy.value;
       this.money += trophy.value;
-      this.scheduleTrophyRespawn(trophy);
       this.disposeTrophy(trophy);
       this.spawnHouseTrophy(trophy.symbol);
       this.callbacks.onStatus?.(`${trophy.symbol} claimed: +$${trophy.value}.`);
@@ -826,20 +967,20 @@ export class WaveRunnersGame {
     const now = performance.now();
     if (!force && now - (this.lastInputSent ?? 0) < 50) return;
     this.lastInputSent = now;
-    this.network.sendInput?.({
+    this.netcode.sendInput({
       score: this.totalScore,
       claimId: this.pendingClaimId,
       phase: this.phase,
       targetScore: this.targetScore,
+      mapId: this.selectedMap.id,
       pose: this.playerPose(),
-      t: Date.now(),
     });
     this.pendingClaimId = null;
   }
 
   updateNetworkHost(dt) {
     if (!this.network || this.networkRole !== "host") return;
-    const inputs = this.network.getInputs?.() ?? [];
+    const inputs = this.netcode.getInputs();
     this.remoteRanking = inputs
       .filter((entry) => entry.value && entry.playerId !== this.playerId)
       .map((entry, index) => ({
@@ -864,12 +1005,14 @@ export class WaveRunnersGame {
 
   publishSnapshot(force = false) {
     if (!this.network || this.networkRole !== "host") return;
-    this.network.publish?.({
-      kind: "wave-runners",
+    this.netcode.publish({
       phase: this.phase,
+      mapId: this.selectedMap.id,
       targetScore: this.targetScore,
       winner: this.winner,
       claimed: [...this.claimedTrophyIds],
+      hostTime: Number(this.time.toFixed(3)),
+      wavePlan: this.waveQueue.snapshot(this.time),
       waves: this.waves.map((wave) => ({
         id: wave.id,
         type: wave.type.id,
@@ -884,7 +1027,9 @@ export class WaveRunnersGame {
   applyNetworkSnapshot(snapshot) {
     if (!snapshot || snapshot.kind !== "wave-runners" || this.networkRole !== "guest") return;
     this.targetScore = snapshot.targetScore ?? this.targetScore;
+    this.applyMap(snapshot.mapId ?? this.selectedMap.id);
     this.winner = snapshot.winner ?? null;
+    this.networkQueueExpired = false;
     this.remoteRanking = snapshot.ranking ?? [];
     this.remotePose = this.remoteRanking.find((entry) => entry.id !== this.playerId)?.pose ?? null;
     if (snapshot.phase === "selecting") {
@@ -900,6 +1045,7 @@ export class WaveRunnersGame {
     }
     if (snapshot.phase === "finished") this.phase = "finished";
     (snapshot.claimed ?? []).forEach((id) => this.claimedTrophyIds.add(id));
+    this.waveQueue.sync(snapshot.wavePlan ?? [], snapshot.hostTime ?? this.time);
     this.reconcileNetworkWaves(snapshot.waves ?? []);
     this.reconcileClaimedTrophies();
   }
@@ -908,7 +1054,6 @@ export class WaveRunnersGame {
     this.trophiesWorld.forEach((trophy) => {
       if (!trophy.collected && this.claimedTrophyIds.has(trophy.id)) {
         trophy.collected = true;
-        this.scheduleTrophyRespawn(trophy);
         this.disposeTrophy(trophy);
         if (this.collecting === trophy) this.cancelCollect();
       }
@@ -1195,7 +1340,6 @@ export class WaveRunnersGame {
     this.bot.targetTrophy = null;
     this.bot.collecting = null;
     this.bot.collectValue = 0;
-    this.scheduleTrophyRespawn(trophy);
     this.disposeTrophy(trophy);
     this.callbacks.onStatus?.(`${this.bot.name} collected ${trophy.symbol}: +$${trophy.value}.`);
     this.checkWinner();
@@ -1329,8 +1473,20 @@ export class WaveRunnersGame {
 
   updateWaves(dt) {
     if (this.networkRole !== "guest") {
-      this.nextWaveIn -= dt;
-      if (this.nextWaveIn <= 0) this.spawnWave();
+      this.waveQueue.fill(
+        this.time,
+        (at) => this.makeWaveEvent(at),
+        () => this.nextWaveDelay(),
+      );
+      this.waveQueue.takeDue(this.time).forEach((event) => this.spawnWave(event));
+    } else {
+      const hostTime = this.waveQueue.estimateHostTime();
+      this.waveQueue.takeDue(hostTime).forEach((event) => this.spawnWave(event));
+      if (!this.networkQueueExpired && this.waveQueue.isExpired()) {
+        this.networkQueueExpired = true;
+        this.phase = "finished";
+        this.callbacks.onStatus?.("Wave sync queue expired. Reconnect or start a new room run.");
+      }
     }
     this.playerGroup.position.set(this.player.x, this.player.y, this.player.z);
     this.playerGroup.rotation.y = this.player.angle;
@@ -1538,7 +1694,11 @@ export class WaveRunnersGame {
     this.actionButton.removeEventListener("pointerup", this.onActionUp);
     this.actionButton.removeEventListener("pointercancel", this.onActionUp);
     this.root.classList.remove("is-active");
+    this.disposeObject3D(this.scene);
+    this.trophiesWorld = [];
+    this.trophyStock.clear();
     this.renderer?.dispose();
+    this.renderer?.forceContextLoss?.();
     this.root.replaceChildren();
   }
 }
