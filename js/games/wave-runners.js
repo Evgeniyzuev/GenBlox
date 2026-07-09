@@ -2,10 +2,19 @@ import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const rand = (min, max) => min + Math.random() * (max - min);
+const seededRandom = (seed) => {
+  let value = seed >>> 0;
+  return () => {
+    value = (value * 1664525 + 1013904223) >>> 0;
+    return value / 4294967296;
+  };
+};
 const PLAYER_MAX_SPEED = 8.7;
 const MAX_GREEN_SURFACE_RUN = 68;
 const GREEN_SAFETY_MARGIN = 1.2;
 const BASE_COLLECT_RATE = 76;
+const COLLECT_RADIUS = 2.175;
+const MATCH_TARGETS = [20000, 50000, 100000];
 const TROPHY_TIERS = [
   { max: 500, items: ["🍎", "🍌", "🍓"] },
   { max: 1000, items: ["🍕", "⚽", "🎧"] },
@@ -34,6 +43,7 @@ const WAVE_TYPES = [
   { id: "yellow", color: 0xffd34d, speed: 13, interval: 4.5, label: "YELLOW" },
   { id: "red", color: 0xff4d68, speed: 18, interval: 3.1, label: "RED" },
 ];
+const waveTypeById = (id) => WAVE_TYPES.find((type) => type.id === id) ?? WAVE_TYPES[1];
 
 export class WaveRunnersGame {
   constructor(root, callbacks = {}) {
@@ -47,8 +57,16 @@ export class WaveRunnersGame {
     this.time = 0;
     this.distance = 0;
     this.bestDistance = 0;
+    this.phase = "selecting";
+    this.targetScore = MATCH_TARGETS[0];
+    this.winner = null;
     this.trophies = 0;
     this.lootValue = 0;
+    this.totalScore = 0;
+    this.bot = callbacks.bot === false ? null : { name: "Bot", score: 0, money: 0, timer: 4.5 };
+    this.network = callbacks.network ?? null;
+    this.networkRole = this.network?.role ?? "solo";
+    this.playerId = this.network?.playerId ?? "solo";
     this.money = 0;
     this.speedLevel = 0;
     this.collectRateLevel = 0;
@@ -62,8 +80,12 @@ export class WaveRunnersGame {
     this.chunks = new Map();
     this.trenches = [];
     this.trophiesWorld = [];
+    this.claimedTrophyIds = new Set();
+    this.pendingClaimId = null;
     this.waves = [];
     this.nextWaveIn = 2.8;
+    this.networkClock = 0;
+    this.remoteRanking = [];
     this.lastInputMove = 0;
     this.mobileInput = {
       active: false,
@@ -92,7 +114,14 @@ export class WaveRunnersGame {
     this.buildShell();
     this.buildScene();
     this.bindEvents();
-    this.callbacks.onStatus?.("Run forward, jump trenches, hide from waves, and hold E near trophies.");
+    this.buildGoalChoice();
+    if (this.networkRole === "guest") {
+      this.goalChoice.querySelector("strong").textContent = "Waiting for host...";
+      this.goalChoice.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+      this.callbacks.onStatus?.("The host is choosing a target score.");
+    } else {
+      this.callbacks.onStatus?.("Choose the target score.");
+    }
     this.frame = requestAnimationFrame(() => this.loop());
   }
 
@@ -106,6 +135,7 @@ export class WaveRunnersGame {
       <div><small>MONEY</small><strong data-wave-money>$0</strong></div>
       <div><small>SPEED</small><strong data-wave-speed>8.7</strong></div>
       <div><small>TAKE RATE</small><strong data-wave-take-rate>$76/s</strong></div>
+      <div><small>RANKING</small><strong data-wave-ranking>-</strong></div>
       <div><small>STATE</small><strong data-wave-state>RUNNING</strong></div>
       <div class="wave-collect" data-wave-collect hidden><span></span></div>
       <div class="wave-controls">W/S move, A/D turn, Space jumps, E harvests. On phone use the stick and right buttons.</div>
@@ -121,11 +151,14 @@ export class WaveRunnersGame {
     `;
     this.overlay = document.createElement("div");
     this.overlay.className = "wave-reset";
-    this.root.append(this.canvasHost, this.hud, this.touchControls, this.overlay);
+    this.goalChoice = document.createElement("div");
+    this.goalChoice.className = "wave-goal-choice";
+    this.root.append(this.canvasHost, this.hud, this.touchControls, this.goalChoice, this.overlay);
     this.distanceEl = this.hud.querySelector("[data-wave-distance]");
     this.moneyEl = this.hud.querySelector("[data-wave-money]");
     this.speedEl = this.hud.querySelector("[data-wave-speed]");
     this.takeRateEl = this.hud.querySelector("[data-wave-take-rate]");
+    this.rankingEl = this.hud.querySelector("[data-wave-ranking]");
     this.stateEl = this.hud.querySelector("[data-wave-state]");
     this.collectEl = this.hud.querySelector("[data-wave-collect]");
     this.collectBar = this.collectEl.querySelector("span");
@@ -250,6 +283,26 @@ export class WaveRunnersGame {
 
     this.speedMachine = this.createUpgradeMachine(11.5, 4.2, "SPEED", this.speedUpgradeCost, "#63dcff");
     this.collectMachine = this.createUpgradeMachine(11.5, 11.2, "TAKE", this.collectUpgradeCost, "#b7f34a");
+  }
+
+  buildGoalChoice() {
+    this.goalChoice.innerHTML = "<strong>PLAY TO</strong>";
+    MATCH_TARGETS.forEach((target) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = `$${target.toLocaleString("en-US")}`;
+      button.addEventListener("click", () => this.startMatch(target));
+      this.goalChoice.append(button);
+    });
+  }
+
+  startMatch(targetScore = MATCH_TARGETS[0], publish = true) {
+    this.targetScore = targetScore;
+    this.phase = "playing";
+    this.winner = null;
+    this.goalChoice.hidden = true;
+    this.callbacks.onStatus?.(`First to $${targetScore.toLocaleString("en-US")} wins.`);
+    if (publish && this.networkRole === "host") this.publishSnapshot(true);
   }
 
   createUpgradeMachine(x, z, label, cost, color) {
@@ -387,7 +440,7 @@ export class WaveRunnersGame {
   updateStick(clientX, clientY) {
     const dx = clamp(clientX - this.mobileInput.startX, -52, 52);
     const dy = clamp(clientY - this.mobileInput.startY, -52, 52);
-    this.mobileInput.x = dx / 52;
+    this.mobileInput.x = -dx / 52;
     this.mobileInput.y = dy / 52;
     this.stickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
@@ -419,11 +472,13 @@ export class WaveRunnersGame {
   createChunk(index) {
     const group = new THREE.Group();
     group.position.z = index * this.chunkLength;
+    const rng = seededRandom(index * 99991 + 17);
+    const r = (min, max) => min + rng() * (max - min);
     const difficulty = clamp(index / 28, 0, 1);
     const recentTrench = this.trenches.some((item) => item.chunk >= index - 1 && item.chunk < index);
     const forcedTrench = index > 0 && !recentTrench;
-    const hasTrench = index > 0 && (Math.random() < 0.58 + difficulty * 0.22 || forcedTrench);
-    const trench = hasTrench ? this.createTrenchSpec(index, forcedTrench) : null;
+    const hasTrench = index > 0 && (rng() < 0.58 + difficulty * 0.22 || forcedTrench);
+    const trench = hasTrench ? this.createTrenchSpec(index, forcedTrench, rng) : null;
     if (trench) {
       this.trenches.push(trench);
     }
@@ -470,62 +525,65 @@ export class WaveRunnersGame {
     }
 
     if (index > 1) {
-      const trophyCount = 2 + Math.floor(Math.random() * 4) + (Math.random() < 0.35 ? 2 : 0);
-      const rowZ = chunkStart + rand(8, this.chunkLength - 8);
+      const trophyCount = 2 + Math.floor(rng() * 4) + (rng() < 0.35 ? 2 : 0);
+      const rowZ = chunkStart + r(8, this.chunkLength - 8);
       for (let item = 0; item < trophyCount; item += 1) {
-        const parallel = item < 4 && Math.random() < 0.72;
-        this.spawnTrophy(index, trench, parallel ? rowZ + rand(-1.4, 1.4) : null);
+        const parallel = item < 4 && rng() < 0.72;
+        this.spawnTrophy(index, trench, parallel ? rowZ + r(-1.4, 1.4) : null, rng);
       }
     }
     this.trackGroup.add(group);
     this.chunks.set(index, group);
   }
 
-  createTrenchSpec(index, forced = false) {
+  createTrenchSpec(index, forced = false, rng = Math.random) {
+    const r = (min, max) => min + rng() * (max - min);
     const chunkStart = index * this.chunkLength;
-    const roll = Math.random();
-    const width = roll < 0.28 ? rand(26, 32) : roll < 0.62 ? rand(9, 15) : rand(13, 22);
+    const roll = rng();
+    const width = roll < 0.28 ? r(26, 32) : roll < 0.62 ? r(9, 15) : r(13, 22);
     const sideSpan = this.trackWidth / 2 - width / 2 - 1;
-    const x = width > this.trackWidth * 0.72 ? 0 : rand(-sideSpan, sideSpan);
-    const length = forced ? rand(9, 14) : roll < 0.35 ? rand(4.5, 7.5) : roll < 0.72 ? rand(8, 12) : rand(13, 17);
+    const x = width > this.trackWidth * 0.72 ? 0 : r(-sideSpan, sideSpan);
+    const length = forced ? r(9, 14) : roll < 0.35 ? r(4.5, 7.5) : roll < 0.72 ? r(8, 12) : r(13, 17);
     const maxStart = forced ? Math.min(9, this.chunkLength - length - 4) : this.chunkLength - length - 4;
-    const z0 = chunkStart + rand(5, maxStart);
+    const z0 = chunkStart + r(5, maxStart);
     return {
       chunk: index,
       x,
       z0,
       z1: z0 + length,
       width,
-      depth: rand(-1.72, -1.48),
+      depth: r(-1.72, -1.48),
     };
   }
 
-  spawnTrophy(index, trench, preferredZ = null) {
+  spawnTrophy(index, trench, preferredZ = null, rng = Math.random) {
+    const r = (min, max) => min + rng() * (max - min);
     const chunkStart = index * this.chunkLength;
-    let z = preferredZ ?? chunkStart + rand(5, this.chunkLength - 5);
+    let z = preferredZ ?? chunkStart + r(5, this.chunkLength - 5);
     if (trench && z > trench.z0 - 2 && z < trench.z1 + 2) {
-      z = Math.random() < 0.5 ? trench.z0 - 3 : trench.z1 + 3;
+      z = rng() < 0.5 ? trench.z0 - 3 : trench.z1 + 3;
     }
-    const randomMultiplier = rand(1, 5);
-    const value = Math.max(5, Math.round((Math.max(3, z) ** 1.5 * randomMultiplier) / 14));
-    const symbol = this.trophySymbolForValue(value);
-    const collectNeed = value * rand(1, 3);
+    const randomMultiplier = r(1, 5);
+    const value = Math.max(5, Math.round((Math.max(3, z) ** 2 * randomMultiplier) / 95));
+    const symbol = this.trophySymbolForValue(value, rng);
+    const collectNeed = value * r(1, 3);
     const sprite = this.createEmojiSprite(symbol, 1.25 + clamp(value / 300, 0, 0.45));
-    let x = rand(-this.trackWidth / 2 + 2.5, this.trackWidth / 2 - 2.5);
+    let x = r(-this.trackWidth / 2 + 2.5, this.trackWidth / 2 - 2.5);
     if (trench && z >= trench.z0 - 1 && z <= trench.z1 + 1 && Math.abs(x - trench.x) < trench.width / 2 + 1.2) {
-      x = trench.x < 0 ? rand(2.5, this.trackWidth / 2 - 2.5) : rand(-this.trackWidth / 2 + 2.5, -2.5);
+      x = trench.x < 0 ? r(2.5, this.trackWidth / 2 - 2.5) : r(-this.trackWidth / 2 + 2.5, -2.5);
     }
     sprite.position.set(x, 1.35, z);
     this.trophyGroup.add(sprite);
     const priceSprite = this.createTextSprite(`$${value}`, "#171525", "rgba(183,243,74,.92)", 1.75, 0.55, x, 2.75, z);
     priceSprite.visible = false;
     this.trophyGroup.add(priceSprite);
-    this.trophiesWorld.push({ sprite, priceSprite, symbol, x: sprite.position.x, z, value, collectNeed, collectedValue: 0, progress: 0, collected: false });
+    const id = `${index}:${Math.round(z * 10)}:${Math.round(x * 10)}:${symbol}`;
+    this.trophiesWorld.push({ id, sprite, priceSprite, symbol, x: sprite.position.x, z, value, collectNeed, collectedValue: 0, progress: 0, collected: false });
   }
 
-  trophySymbolForValue(value) {
+  trophySymbolForValue(value, rng = Math.random) {
     const tier = TROPHY_TIERS.find((item) => value <= item.max) ?? TROPHY_TIERS[TROPHY_TIERS.length - 1];
-    return tier.items[Math.floor(Math.random() * tier.items.length)];
+    return tier.items[Math.floor(rng() * tier.items.length)];
   }
 
   disposeTrophy(trophy) {
@@ -561,6 +619,12 @@ export class WaveRunnersGame {
         : roll < 0.86 - difficulty * 0.08
           ? WAVE_TYPES[2]
           : WAVE_TYPES[3];
+    const speed = type.speed + (type.harmless ? difficulty * 2.5 : difficulty * 7);
+    this.createWaveMesh(type, this.player.z + 150, speed, `${Math.floor(this.time * 1000)}:${type.id}:${this.waves.length}`);
+    this.nextWaveIn = Math.max(1.45, (type.interval - difficulty * 1.55) * rand(0.7, 1.3));
+  }
+
+  createWaveMesh(type, z, speed, id) {
     const geometry = new THREE.BoxGeometry(42, 2.2, 0.65);
     const material = new THREE.MeshStandardMaterial({
       color: type.color,
@@ -570,11 +634,12 @@ export class WaveRunnersGame {
       opacity: 0.72,
     });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(0, 1.35, this.player.z + 150);
+    mesh.position.set(0, 1.35, z);
     mesh.castShadow = true;
     this.waveGroup.add(mesh);
-    this.waves.push({ mesh, type, speed: type.speed + (type.harmless ? difficulty * 2.5 : difficulty * 7), box: new THREE.Box3() });
-    this.nextWaveIn = Math.max(1.45, (type.interval - difficulty * 1.55) * rand(0.7, 1.3));
+    const wave = { id, mesh, type, speed, box: new THREE.Box3() };
+    this.waves.push(wave);
+    return wave;
   }
 
   updateInput(dt) {
@@ -602,7 +667,7 @@ export class WaveRunnersGame {
   }
 
   currentCollectRate() {
-    return Math.round(BASE_COLLECT_RATE * (1.18 ** this.collectRateLevel));
+    return Math.round(BASE_COLLECT_RATE * (1.3 ** this.collectRateLevel));
   }
 
   updatePhysics(dt) {
@@ -629,21 +694,166 @@ export class WaveRunnersGame {
     const harvest = this.keys.has("e") || this.mobileInput.action;
     if (this.nearbyUpgradeMachine()) return;
     if (!harvest || !this.player.grounded || this.player.inTrench || this.lastInputMove > 0.4) return;
-    const trophy = this.collecting ?? this.trophiesWorld.find((item) => Math.hypot(item.x - this.player.x, item.z - this.player.z) < 1.45);
+    const trophy = this.collecting ?? this.trophiesWorld.find((item) => !item.collected && Math.hypot(item.x - this.player.x, item.z - this.player.z) < COLLECT_RADIUS);
     if (!trophy) return;
     this.collecting = trophy;
     trophy.collectedValue += this.currentCollectRate() * dt;
     trophy.progress = clamp(trophy.collectedValue / trophy.collectNeed, 0, 1);
     if (trophy.progress >= 1) {
       trophy.collected = true;
+      this.claimedTrophyIds.add(trophy.id);
+      this.pendingClaimId = trophy.id;
       this.trophies += 1;
       this.lootValue += trophy.value;
+      this.totalScore += trophy.value;
       this.money += trophy.value;
       this.disposeTrophy(trophy);
       this.spawnHouseTrophy(trophy.symbol);
       this.callbacks.onStatus?.(`${trophy.symbol} claimed: +$${trophy.value}.`);
       this.collecting = null;
+      this.checkWinner();
     }
+  }
+
+  sendNetworkInput(force = false) {
+    if (!this.network) return;
+    const now = performance.now();
+    if (!force && now - (this.lastInputSent ?? 0) < 80) return;
+    this.lastInputSent = now;
+    this.network.sendInput?.({
+      score: this.totalScore,
+      claimId: this.pendingClaimId,
+      phase: this.phase,
+      targetScore: this.targetScore,
+      t: Date.now(),
+    });
+    this.pendingClaimId = null;
+  }
+
+  updateNetworkHost(dt) {
+    if (!this.network || this.networkRole !== "host") return;
+    const inputs = this.network.getInputs?.() ?? [];
+    this.remoteRanking = inputs
+      .filter((entry) => entry.value && entry.playerId !== this.playerId)
+      .map((entry, index) => ({
+        id: entry.playerId,
+        name: `Player ${index + 2}`,
+        score: Number(entry.value.score) || 0,
+      }));
+    inputs.forEach((entry) => {
+      const claimId = entry.value?.claimId;
+      if (claimId) this.claimedTrophyIds.add(claimId);
+    });
+    this.reconcileClaimedTrophies();
+    this.checkWinner();
+    this.networkClock += dt;
+    if (this.networkClock >= 0.18) {
+      this.networkClock = 0;
+      this.publishSnapshot();
+    }
+  }
+
+  publishSnapshot(force = false) {
+    if (!this.network || this.networkRole !== "host") return;
+    this.network.publish?.({
+      kind: "wave-runners",
+      phase: this.phase,
+      targetScore: this.targetScore,
+      winner: this.winner,
+      claimed: [...this.claimedTrophyIds],
+      waves: this.waves.map((wave) => ({
+        id: wave.id,
+        type: wave.type.id,
+        z: wave.mesh.position.z,
+        speed: wave.speed,
+      })),
+      ranking: this.rankingEntries(),
+      revision: force ? Date.now() : Math.floor(this.time * 1000),
+    });
+  }
+
+  applyNetworkSnapshot(snapshot) {
+    if (!snapshot || snapshot.kind !== "wave-runners" || this.networkRole !== "guest") return;
+    this.targetScore = snapshot.targetScore ?? this.targetScore;
+    this.winner = snapshot.winner ?? null;
+    this.remoteRanking = snapshot.ranking ?? [];
+    if (snapshot.phase === "selecting") {
+      this.phase = "selecting";
+      this.goalChoice.hidden = false;
+      this.callbacks.onStatus?.("The host is choosing a target score.");
+      return;
+    }
+    if (snapshot.phase === "playing" && this.phase !== "playing") {
+      this.phase = "playing";
+      this.goalChoice.hidden = true;
+      this.callbacks.onStatus?.(`First to $${this.targetScore.toLocaleString("en-US")} wins.`);
+    }
+    if (snapshot.phase === "finished") this.phase = "finished";
+    (snapshot.claimed ?? []).forEach((id) => this.claimedTrophyIds.add(id));
+    this.reconcileNetworkWaves(snapshot.waves ?? []);
+    this.reconcileClaimedTrophies();
+  }
+
+  reconcileClaimedTrophies() {
+    this.trophiesWorld.forEach((trophy) => {
+      if (!trophy.collected && this.claimedTrophyIds.has(trophy.id)) {
+        trophy.collected = true;
+        this.disposeTrophy(trophy);
+        if (this.collecting === trophy) this.cancelCollect();
+      }
+    });
+  }
+
+  reconcileNetworkWaves(waves) {
+    const liveIds = new Set(waves.map((wave) => wave.id));
+    this.waves = this.waves.filter((wave) => {
+      if (liveIds.has(wave.id)) return true;
+      this.waveGroup.remove(wave.mesh);
+      wave.mesh.geometry.dispose();
+      wave.mesh.material.dispose();
+      return false;
+    });
+    waves.forEach((snapshot) => {
+      let wave = this.waves.find((item) => item.id === snapshot.id);
+      if (!wave) {
+        wave = this.createWaveMesh(waveTypeById(snapshot.type), snapshot.z, snapshot.speed, snapshot.id);
+      }
+      wave.type = waveTypeById(snapshot.type);
+      wave.speed = snapshot.speed;
+      wave.mesh.position.z = snapshot.z;
+    });
+  }
+
+  updateBot(dt) {
+    if (!this.bot || this.phase !== "playing" || this.winner) return;
+    this.bot.timer -= dt;
+    if (this.bot.timer > 0) return;
+    const gain = Math.round((Math.max(30, this.distance + 35) ** 1.15) * rand(0.18, 0.42));
+    this.bot.score += gain;
+    this.bot.money += gain;
+    this.bot.timer = rand(3.2, 6.8);
+    this.checkWinner();
+  }
+
+  rankingEntries() {
+    const localName = this.networkRole === "host" ? "Host" : "You";
+    const entries = [{ id: this.playerId, name: localName, score: this.totalScore }];
+    if (this.bot) entries.push({ id: "bot", name: this.bot.name, score: this.bot.score });
+    if (this.remoteRanking) {
+      this.remoteRanking.forEach((entry) => {
+        if (entry.id !== this.playerId) entries.push(entry);
+      });
+    }
+    return entries.sort((a, b) => b.score - a.score);
+  }
+
+  checkWinner() {
+    if (this.winner || this.phase !== "playing") return;
+    const winner = this.rankingEntries().find((entry) => entry.score >= this.targetScore);
+    if (!winner) return;
+    this.winner = winner.name;
+    this.phase = "finished";
+    this.callbacks.onStatus?.(`${winner.name} wins at $${Math.floor(winner.score).toLocaleString("en-US")}!`);
   }
 
   nearbyUpgradeMachine() {
@@ -717,8 +927,10 @@ export class WaveRunnersGame {
   }
 
   updateWaves(dt) {
-    this.nextWaveIn -= dt;
-    if (this.nextWaveIn <= 0) this.spawnWave();
+    if (this.networkRole !== "guest") {
+      this.nextWaveIn -= dt;
+      if (this.nextWaveIn <= 0) this.spawnWave();
+    }
     this.playerGroup.position.set(this.player.x, this.player.y, this.player.z);
     this.playerGroup.rotation.y = this.player.angle;
     const playerBox = this.player.box.setFromObject(this.playerGroup);
@@ -810,6 +1022,10 @@ export class WaveRunnersGame {
     this.moneyEl.textContent = `$${this.money}`;
     this.speedEl.textContent = this.currentMaxSpeed().toFixed(1);
     this.takeRateEl.textContent = `$${this.currentCollectRate()}/s`;
+    this.rankingEl.textContent = this.rankingEntries()
+      .slice(0, 3)
+      .map((entry) => `${entry.name}: $${Math.floor(entry.score)}`)
+      .join(" / ");
     this.player.state = this.collecting
       ? PLAYER_STATES.COLLECTING
       : !this.player.grounded
@@ -828,11 +1044,23 @@ export class WaveRunnersGame {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     this.time += dt;
     this.deathFlash = Math.max(0, this.deathFlash - dt * 1.8);
+    if (this.phase !== "playing") {
+      this.updateCamera(dt);
+      this.updateHud();
+      this.sendNetworkInput();
+      this.updateNetworkHost(dt);
+      this.renderer.render(this.scene, this.camera);
+      this.frame = requestAnimationFrame(() => this.loop());
+      return;
+    }
     this.updateInput(dt);
     this.updatePhysics(dt);
     this.generateChunksAround(this.player.z);
     this.updateBaseInteraction();
     this.updateCollecting(dt);
+    this.updateBot(dt);
+    this.sendNetworkInput();
+    this.updateNetworkHost(dt);
     this.updateWaves(dt);
     this.updateAnimation(dt);
     this.updateCamera(dt);

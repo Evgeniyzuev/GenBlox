@@ -414,6 +414,33 @@ function syncRoom() {
       microGame.applyNetworkSnapshot(game);
       return;
     }
+    if (activeGameId === "wave-runners") {
+      if (client.playerIndex > 1) {
+        destroyRealtimeGames();
+        showRealtimeUnavailable(elements.waveStage, "Spectating", "Wave Runners supports two active runners in this version.");
+        elements.waveStatus.textContent = "Spectating Wave Runners";
+        return;
+      }
+      if (!waveGame) {
+        wormsGame?.destroy();
+        microGame?.destroy();
+        wormsGame = null;
+        microGame = null;
+        waveGame = new WaveRunnersGame(elements.waveStage, {
+          bot: false,
+          onStatus: (message) => { elements.waveStatus.textContent = message; },
+          network: {
+            role: client.isHost ? "host" : "guest",
+            playerId: client.playerId,
+            publish: (snapshot) => client.setGameState("wave-runners", snapshot, false),
+            sendInput: (input) => client.setLocalPlayerState("wave-runners:input", input, false),
+            getInputs: () => client.getAllPlayerStates("wave-runners:input"),
+          },
+        });
+      }
+      waveGame.applyNetworkSnapshot(game);
+      return;
+    }
     if (isValidGameState(game)) renderGame(game, client.playerCount, roomPlayerSide());
   } else if (elements.gameDialog.open && mode === "room") {
     closeGameFromSync();
@@ -490,7 +517,9 @@ function setupGameShell() {
         ? "Choose a track for the room race"
         : "The race host is choosing a track...";
     } else {
-      elements.waveStatus.textContent = "Wave Runners is a solo Three.js challenge.";
+      elements.waveStatus.textContent = client.isHost
+        ? "Choose a target score for the room run"
+        : "The host is choosing a target score...";
     }
   }
   selectedChecker = null;
@@ -605,6 +634,27 @@ function launchForRoom(gameId) {
     client.setRoomState({
       screen: "game",
       activeGame: "micromachines",
+      startedAt: Date.now(),
+      revision,
+    });
+    mode = "room";
+    setupGameShell();
+    openOverlay(elements.gameDialog, "game");
+    elements.gameDialog.requestFullscreen?.()
+      .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
+      .catch(() => {});
+    return;
+  }
+  if (gameId === "wave-runners") {
+    client.setGameState("wave-runners", {
+      kind: "wave-runners",
+      phase: "selecting",
+      revision: Date.now(),
+    });
+    const revision = (client.getRoomState()?.revision ?? 0) + 1;
+    client.setRoomState({
+      screen: "game",
+      activeGame: "wave-runners",
       startedAt: Date.now(),
       revision,
     });
