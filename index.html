@@ -26,9 +26,15 @@
         <span class="brand-cube" aria-hidden="true"></span>
         <span>GEN<span>BLOX</span></span>
       </a>
-      <button class="room-button" id="open-room-menu" type="button">
-        <i></i><span id="room-button-label">Rooms</span>
-      </button>
+      <div class="topbar-actions">
+        <button class="player-button" id="open-player-menu" type="button" aria-label="Player profile">
+          <span id="player-button-avatar">🙂</span>
+          <span id="player-button-name">Player</span>
+        </button>
+        <button class="room-button" id="open-room-menu" type="button">
+          <i></i><span id="room-button-label">Rooms</span>
+        </button>
+      </div>
     </header>
 
     <main>
@@ -74,6 +80,8 @@
             </div>
           </div>
           <div class="card-copy">
+            <p class="eyebrow">SPACE 001</p>
+            <h2>Tic-Tac-Toe</h2>
             <p>A classic 3 x 3 match for two players.</p>
             <div class="card-actions">
               <button class="secondary-button play-solo" data-game="tic-tac-toe" type="button">
@@ -190,6 +198,37 @@
         </div>
       </section>
     </main>
+
+    <dialog class="menu-dialog" id="player-dialog">
+      <div class="menu-shell">
+        <header class="game-header">
+          <div>
+            <p class="eyebrow">PLAYER</p>
+            <h2>Profile</h2>
+          </div>
+          <button class="icon-button" data-close-dialog="player-dialog" type="button" aria-label="Close">Г—</button>
+        </header>
+
+        <form class="profile-form" id="player-profile-form">
+          <label for="player-name">Display Name</label>
+          <input id="player-name" name="playerName" maxlength="18" autocomplete="nickname" />
+
+          <span class="profile-label">Avatar</span>
+          <div class="avatar-grid" id="avatar-grid" role="radiogroup" aria-label="Choose avatar">
+            <button type="button" data-avatar="🙂" aria-label="Smile avatar">🙂</button>
+            <button type="button" data-avatar="😎" aria-label="Cool avatar">😎</button>
+            <button type="button" data-avatar="🤖" aria-label="Robot avatar">🤖</button>
+            <button type="button" data-avatar="👾" aria-label="Alien avatar">👾</button>
+            <button type="button" data-avatar="🔥" aria-label="Fire avatar">🔥</button>
+            <button type="button" data-avatar="⚡" aria-label="Lightning avatar">⚡</button>
+            <button type="button" data-avatar="🌈" aria-label="Rainbow avatar">🌈</button>
+            <button type="button" data-avatar="🎮" aria-label="Gamepad avatar">🎮</button>
+          </div>
+
+          <button class="primary-button" type="submit">Save Profile</button>
+        </form>
+      </div>
+    </dialog>
 
     <dialog class="menu-dialog" id="room-dialog">
       <div class="menu-shell">

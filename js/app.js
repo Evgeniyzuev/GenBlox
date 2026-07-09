@@ -95,7 +95,19 @@ const GAMES = {
 };
 
 const $ = (selector) => document.querySelector(selector);
+const PROFILE_STORAGE_KEY = "genblox:player-profile";
+const DEFAULT_PROFILE = { name: "Player", avatar: "🙂" };
+const AVATARS = ["🙂", "😎", "🤖", "👾", "🔥", "⚡", "🌈", "🎮"];
+
 const elements = {
+  openPlayerMenu: $("#open-player-menu"),
+  playerButtonAvatar: $("#player-button-avatar"),
+  playerButtonName: $("#player-button-name"),
+  playerDialog: $("#player-dialog"),
+  profileForm: $("#player-profile-form"),
+  playerNameInput: $("#player-name"),
+  avatarGrid: $("#avatar-grid"),
+  avatarButtons: [...document.querySelectorAll("[data-avatar]")],
   openRoomMenu: $("#open-room-menu"),
   roomButtonLabel: $("#room-button-label"),
   roomDialog: $("#room-dialog"),
@@ -172,6 +184,65 @@ let suppressGameReturn = false;
 let wormsGame = null;
 let microGame = null;
 let waveGame = null;
+let playerProfile = loadPlayerProfile();
+let lastPublishedProfile = "";
+
+function cleanPlayerName(name) {
+  const text = String(name ?? "").trim().replace(/\s+/g, " ");
+  return text.slice(0, 18) || DEFAULT_PROFILE.name;
+}
+
+function normalizeProfile(profile) {
+  return {
+    name: cleanPlayerName(profile?.name),
+    avatar: AVATARS.includes(profile?.avatar) ? profile.avatar : DEFAULT_PROFILE.avatar,
+  };
+}
+
+function loadPlayerProfile() {
+  try {
+    return normalizeProfile(JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) ?? "null"));
+  } catch {
+    return { ...DEFAULT_PROFILE };
+  }
+}
+
+function savePlayerProfile(profile) {
+  playerProfile = normalizeProfile(profile);
+  localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(playerProfile));
+  renderPlayerProfile();
+  publishPlayerProfile();
+}
+
+function renderPlayerProfile() {
+  elements.playerButtonAvatar.textContent = playerProfile.avatar;
+  elements.playerButtonName.textContent = playerProfile.name;
+  elements.playerNameInput.value = playerProfile.name;
+  elements.avatarButtons.forEach((button) => {
+    const selected = button.dataset.avatar === playerProfile.avatar;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-checked", selected ? "true" : "false");
+  });
+}
+
+function publishPlayerProfile() {
+  if (!client?.started) return;
+  const serialized = JSON.stringify(playerProfile);
+  if (serialized === lastPublishedProfile) return;
+  lastPublishedProfile = serialized;
+  client.setLocalPlayerState("profile", playerProfile, true);
+}
+
+function profileForPlayer(player, fallbackName) {
+  const raw = player?.getState?.("profile");
+  if (!raw) return fallbackName;
+  const profile = normalizeProfile(raw);
+  return `${profile.avatar} ${profile.name}`;
+}
+
+function playerByIndex(index) {
+  return client?.players[index] ?? null;
+}
 
 function isRealtimeGame(gameId) {
   return gameId === "worms" || gameId === "micromachines" || gameId === "wave-runners";
@@ -303,6 +374,7 @@ async function connectRoom({ matchmaking = false, roomCode = "", kind }, trigger
     client ??= new PlayroomClient();
     await client.start({ matchmaking, roomCode: code || undefined });
     roomKind = kind;
+    publishPlayerProfile();
 
     client.onDisconnect((event) => {
       clearInterval(syncTimer);
@@ -404,7 +476,10 @@ function syncRoom() {
           network: {
             role: client.isHost ? "host" : "guest",
             playerId: client.playerId,
-            getPlayers: () => client.players.slice(0, client.maxPlayers).map((player) => ({ id: player.id })),
+            getPlayers: () => client.players.slice(0, client.maxPlayers).map((player, index) => ({
+              id: player.id,
+              name: profileForPlayer(player, index === 0 ? "Host" : `Player ${index + 1}`),
+            })),
             publish: (snapshot) => client.setGameState("micromachines", snapshot, false),
             sendInput: (input) => client.setLocalPlayerState("micromachines:input", input, false),
             getInputs: () => client.getAllPlayerStates("micromachines:input"),
@@ -452,6 +527,7 @@ function renderParty() {
   const text = `Players: ${Math.min(client.playerCount, client.maxPlayers)} / ${client.maxPlayers}`;
   elements.partyPlayers.textContent = text;
   elements.roomPlayerCount.textContent = text;
+  publishPlayerProfile();
 }
 
 function setupRoomLabels() {
@@ -468,8 +544,8 @@ function setupRoomLabels() {
   if (side === null) {
     elements.role.textContent = "Spectating";
     elements.players.textContent = `Players: ${Math.min(client.playerCount, 2)} / 2`;
-    elements.nameX.textContent = "Room Host";
-    elements.nameO.textContent = "Second Player";
+    elements.nameX.textContent = profileForPlayer(playerByIndex(0), "Room Host");
+    elements.nameO.textContent = profileForPlayer(playerByIndex(1), "Second Player");
     elements.newRound.hidden = true;
     elements.hint.textContent = "This game is limited to two active players.";
     return;
@@ -478,8 +554,8 @@ function setupRoomLabels() {
     ? `You play ${side === CHECKER_COLORS.BLACK ? "black" : "white"}`
     : `You play ${side === "X" ? "×" : "○"}`;
   elements.players.textContent = `Players: ${Math.min(client.playerCount, 2)} / 2`;
-  elements.nameX.textContent = "Room Host";
-  elements.nameO.textContent = "Second Player";
+  elements.nameX.textContent = profileForPlayer(playerByIndex(0), "Room Host");
+  elements.nameO.textContent = profileForPlayer(playerByIndex(1), "Second Player");
   elements.newRound.hidden = !client.isHost;
   elements.hint.textContent = "The × button ends the game and returns the whole room to the catalog.";
 }
@@ -591,7 +667,7 @@ function openSoloGame(gameId) {
   const humanSide = activeGameId === "checkers" ? CHECKER_COLORS.BLACK : "X";
   elements.role.textContent = activeGameId === "checkers" ? "You play black" : "You play ×";
   elements.players.textContent = "Solo game";
-  elements.nameX.textContent = "You";
+  elements.nameX.textContent = `${playerProfile.avatar} ${playerProfile.name}`;
   elements.nameO.textContent = "Computer";
   elements.newRound.hidden = false;
   elements.hint.textContent = "Close the game to return to the catalog.";
@@ -862,9 +938,23 @@ async function copyInvite() {
   }
 }
 
+function chooseAvatar(avatar) {
+  savePlayerProfile({ ...playerProfile, name: elements.playerNameInput.value, avatar });
+}
+
+function submitPlayerProfile(event) {
+  event.preventDefault();
+  savePlayerProfile({ ...playerProfile, name: elements.playerNameInput.value });
+  closeOverlay(elements.playerDialog, "player");
+}
+
 function handlePopState() {
   if (elements.helpDialog.open) {
     elements.helpDialog.close();
+    return;
+  }
+  if (elements.playerDialog.open) {
+    elements.playerDialog.close();
     return;
   }
   if (elements.gameDialog.open) {
@@ -882,6 +972,11 @@ function handlePopState() {
   if (elements.roomDialog.open) elements.roomDialog.close();
 }
 
+elements.openPlayerMenu.addEventListener("click", () => openOverlay(elements.playerDialog, "player"));
+elements.profileForm.addEventListener("submit", submitPlayerProfile);
+elements.avatarButtons.forEach((button) => {
+  button.addEventListener("click", () => chooseAvatar(button.dataset.avatar));
+});
 elements.openRoomMenu.addEventListener("click", () => openOverlay(elements.roomDialog, "room"));
 elements.findPublic.addEventListener("click", () => connectRoom({ matchmaking: true, kind: "public" }, elements.findPublic));
 elements.createPrivate.addEventListener("click", () => connectRoom({ kind: "private" }, elements.createPrivate));
@@ -902,7 +997,14 @@ elements.newRound.addEventListener("click", startNewRound);
 elements.openHelp.addEventListener("click", () => openOverlay(elements.helpDialog, "help"));
 elements.closeHelp.addEventListener("click", () => closeOverlay(elements.helpDialog, "help"));
 document.querySelectorAll("[data-close-dialog]").forEach((button) => {
-  button.addEventListener("click", () => closeOverlay(document.getElementById(button.dataset.closeDialog), "room"));
+  button.addEventListener("click", () => {
+    const dialogId = button.dataset.closeDialog;
+    closeOverlay(document.getElementById(dialogId), dialogId.replace("-dialog", ""));
+  });
+});
+elements.playerDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeOverlay(elements.playerDialog, "player");
 });
 elements.roomDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
@@ -918,6 +1020,7 @@ elements.helpDialog.addEventListener("cancel", (event) => {
 });
 window.addEventListener("popstate", handlePopState);
 
+renderPlayerProfile();
 buildBoard("tic-tac-toe");
 
 const invitedCode = roomCodeFromUrl();

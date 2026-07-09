@@ -300,7 +300,7 @@ export class MicroMachinesGame {
     return players.slice(0, 4).map((player, slot) => ({
       playerId: player.id,
       slot,
-      name: slot === 0 ? "Host" : `Player ${slot + 1}`,
+      name: player.name ?? (slot === 0 ? "Host" : `Player ${slot + 1}`),
     }));
   }
 
