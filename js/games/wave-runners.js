@@ -63,7 +63,7 @@ export class WaveRunnersGame {
     this.trophies = 0;
     this.lootValue = 0;
     this.totalScore = 0;
-    this.bot = callbacks.bot === false ? null : { name: "Bot", score: 0, money: 0, timer: 4.5 };
+    this.bot = callbacks.bot === false ? null : { name: "Bot", score: 0, money: 0, timer: 4.5, x: 3.8, y: 1.55, z: 5, angle: 0, speed: 6.1 };
     this.network = callbacks.network ?? null;
     this.networkRole = this.network?.role ?? "solo";
     this.playerId = this.network?.playerId ?? "solo";
@@ -86,6 +86,7 @@ export class WaveRunnersGame {
     this.nextWaveIn = 2.8;
     this.networkClock = 0;
     this.remoteRanking = [];
+    this.remotePose = null;
     this.lastInputMove = 0;
     this.mobileInput = {
       active: false,
@@ -203,8 +204,10 @@ export class WaveRunnersGame {
       roof: new THREE.MeshStandardMaterial({ color: 0xff668c, roughness: 0.7 }),
       machine: new THREE.MeshStandardMaterial({ color: 0x63dcff, roughness: 0.45, emissive: 0x174556, emissiveIntensity: 0.25 }),
       playerBody: new THREE.MeshStandardMaterial({ color: 0x4aa7ff, roughness: 0.65 }),
+      remoteBody: new THREE.MeshStandardMaterial({ color: 0xff8a3d, roughness: 0.65 }),
       playerSkin: new THREE.MeshStandardMaterial({ color: 0xf0c18f, roughness: 0.7 }),
       playerHair: new THREE.MeshStandardMaterial({ color: 0x2b1f27, roughness: 0.75 }),
+      remoteHair: new THREE.MeshStandardMaterial({ color: 0x412f18, roughness: 0.75 }),
       trophy: new THREE.MeshStandardMaterial({ color: 0xffd54f, emissive: 0x806000, emissiveIntensity: 0.45, roughness: 0.35 }),
     };
 
@@ -223,14 +226,25 @@ export class WaveRunnersGame {
     this.scene.add(this.houseTrophyGroup);
     this.createBase();
     this.playerGroup = this.createPlayer();
+    this.parts = this.playerGroup.userData.parts;
     this.scene.add(this.playerGroup);
+    this.remoteGroup = this.createPlayer({
+      body: this.materials.remoteBody,
+      hair: this.materials.remoteHair,
+    });
+    this.remoteParts = this.remoteGroup.userData.parts;
+    this.remoteGroup.visible = Boolean(this.bot || this.network);
+    this.scene.add(this.remoteGroup);
 
     this.resize();
     this.generateChunksAround(0);
   }
 
-  createPlayer() {
+  createPlayer(materials = {}) {
     const group = new THREE.Group();
+    const bodyMaterial = materials.body ?? this.materials.playerBody;
+    const skinMaterial = materials.skin ?? this.materials.playerSkin;
+    const hairMaterial = materials.hair ?? this.materials.playerHair;
     const makePart = (name, size, position, material) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), material);
       mesh.name = name;
@@ -240,15 +254,16 @@ export class WaveRunnersGame {
       group.add(mesh);
       return mesh;
     };
-    this.parts = {
-      torso: makePart("torso", new THREE.Vector3(0.9, 1.1, 0.45), new THREE.Vector3(0, 0.45, 0), this.materials.playerBody),
-      head: makePart("head", new THREE.Vector3(0.68, 0.68, 0.68), new THREE.Vector3(0, 1.35, 0), this.materials.playerSkin),
-      hair: makePart("hair", new THREE.Vector3(0.74, 0.22, 0.74), new THREE.Vector3(0, 1.78, 0), this.materials.playerHair),
-      leftArm: makePart("leftArm", new THREE.Vector3(0.28, 0.95, 0.3), new THREE.Vector3(-0.72, 0.42, 0), this.materials.playerSkin),
-      rightArm: makePart("rightArm", new THREE.Vector3(0.28, 0.95, 0.3), new THREE.Vector3(0.72, 0.42, 0), this.materials.playerSkin),
-      leftLeg: makePart("leftLeg", new THREE.Vector3(0.32, 0.95, 0.34), new THREE.Vector3(-0.25, -0.6, 0), this.materials.playerBody),
-      rightLeg: makePart("rightLeg", new THREE.Vector3(0.32, 0.95, 0.34), new THREE.Vector3(0.25, -0.6, 0), this.materials.playerBody),
+    const parts = {
+      torso: makePart("torso", new THREE.Vector3(0.9, 1.1, 0.45), new THREE.Vector3(0, 0.45, 0), bodyMaterial),
+      head: makePart("head", new THREE.Vector3(0.68, 0.68, 0.68), new THREE.Vector3(0, 1.35, 0), skinMaterial),
+      hair: makePart("hair", new THREE.Vector3(0.74, 0.22, 0.74), new THREE.Vector3(0, 1.78, 0), hairMaterial),
+      leftArm: makePart("leftArm", new THREE.Vector3(0.28, 0.95, 0.3), new THREE.Vector3(-0.72, 0.42, 0), skinMaterial),
+      rightArm: makePart("rightArm", new THREE.Vector3(0.28, 0.95, 0.3), new THREE.Vector3(0.72, 0.42, 0), skinMaterial),
+      leftLeg: makePart("leftLeg", new THREE.Vector3(0.32, 0.95, 0.34), new THREE.Vector3(-0.25, -0.6, 0), bodyMaterial),
+      rightLeg: makePart("rightLeg", new THREE.Vector3(0.32, 0.95, 0.34), new THREE.Vector3(0.25, -0.6, 0), bodyMaterial),
     };
+    group.userData.parts = parts;
     return group;
   }
 
@@ -718,13 +733,14 @@ export class WaveRunnersGame {
   sendNetworkInput(force = false) {
     if (!this.network) return;
     const now = performance.now();
-    if (!force && now - (this.lastInputSent ?? 0) < 80) return;
+    if (!force && now - (this.lastInputSent ?? 0) < 50) return;
     this.lastInputSent = now;
     this.network.sendInput?.({
       score: this.totalScore,
       claimId: this.pendingClaimId,
       phase: this.phase,
       targetScore: this.targetScore,
+      pose: this.playerPose(),
       t: Date.now(),
     });
     this.pendingClaimId = null;
@@ -739,7 +755,9 @@ export class WaveRunnersGame {
         id: entry.playerId,
         name: `Player ${index + 2}`,
         score: Number(entry.value.score) || 0,
+        pose: entry.value.pose ?? null,
       }));
+    this.remotePose = this.remoteRanking[0]?.pose ?? null;
     inputs.forEach((entry) => {
       const claimId = entry.value?.claimId;
       if (claimId) this.claimedTrophyIds.add(claimId);
@@ -747,7 +765,7 @@ export class WaveRunnersGame {
     this.reconcileClaimedTrophies();
     this.checkWinner();
     this.networkClock += dt;
-    if (this.networkClock >= 0.18) {
+    if (this.networkClock >= 0.1) {
       this.networkClock = 0;
       this.publishSnapshot();
     }
@@ -777,6 +795,7 @@ export class WaveRunnersGame {
     this.targetScore = snapshot.targetScore ?? this.targetScore;
     this.winner = snapshot.winner ?? null;
     this.remoteRanking = snapshot.ranking ?? [];
+    this.remotePose = this.remoteRanking.find((entry) => entry.id !== this.playerId)?.pose ?? null;
     if (snapshot.phase === "selecting") {
       this.phase = "selecting";
       this.goalChoice.hidden = false;
@@ -826,6 +845,14 @@ export class WaveRunnersGame {
 
   updateBot(dt) {
     if (!this.bot || this.phase !== "playing" || this.winner) return;
+    const targetSpeed = 6.1 + clamp(this.distance / 260, 0, 2.4);
+    this.bot.speed += (targetSpeed - this.bot.speed) * (1 - Math.exp(-2.4 * dt));
+    this.bot.angle = Math.sin(this.time * 0.45) * 0.12;
+    this.bot.x = clamp(3.8 + Math.sin(this.time * 0.8) * 1.2, -this.trackWidth / 2 + 1.1, this.trackWidth / 2 - 1.1);
+    this.bot.z = Math.max(5, this.bot.z + Math.cos(this.bot.angle) * this.bot.speed * dt);
+    if (this.bot.z < this.player.z - 12) this.bot.z = this.player.z - 8;
+    if (this.bot.z > this.player.z + 32) this.bot.z = this.player.z + 24;
+    this.bot.y += (this.surfaceY(this.bot.z) - this.bot.y) * (1 - Math.exp(-12 * dt));
     this.bot.timer -= dt;
     if (this.bot.timer > 0) return;
     const gain = Math.round((Math.max(30, this.distance + 35) ** 1.15) * rand(0.18, 0.42));
@@ -837,14 +864,49 @@ export class WaveRunnersGame {
 
   rankingEntries() {
     const localName = this.networkRole === "host" ? "Host" : "You";
-    const entries = [{ id: this.playerId, name: localName, score: this.totalScore }];
-    if (this.bot) entries.push({ id: "bot", name: this.bot.name, score: this.bot.score });
+    const entries = [{ id: this.playerId, name: localName, score: this.totalScore, pose: this.playerPose() }];
+    if (this.bot) {
+      entries.push({
+        id: "bot",
+        name: this.bot.name,
+        score: this.bot.score,
+        pose: {
+          x: Number(this.bot.x.toFixed(2)),
+          y: Number(this.bot.y.toFixed(2)),
+          z: Number(this.bot.z.toFixed(2)),
+          angle: Number(this.bot.angle.toFixed(3)),
+          speed: Number(this.bot.speed.toFixed(2)),
+        },
+      });
+    }
     if (this.remoteRanking) {
       this.remoteRanking.forEach((entry) => {
         if (entry.id !== this.playerId) entries.push(entry);
       });
     }
     return entries.sort((a, b) => b.score - a.score);
+  }
+
+  playerPose() {
+    return {
+      x: Number(this.player.x.toFixed(2)),
+      y: Number(this.player.y.toFixed(2)),
+      z: Number(this.player.z.toFixed(2)),
+      angle: Number(this.player.angle.toFixed(3)),
+      speed: Number(this.player.speed.toFixed(2)),
+    };
+  }
+
+  updateRemoteVisual(dt) {
+    if (!this.remoteGroup) return;
+    const source = this.bot ?? this.remotePose;
+    this.remoteGroup.visible = Boolean(source);
+    if (!source) return;
+    const target = new THREE.Vector3(source.x ?? 0, source.y ?? 1.55, source.z ?? 5);
+    this.remoteGroup.position.lerp(target, 1 - Math.exp(-12 * dt));
+    const angle = source.angle ?? 0;
+    const delta = Math.atan2(Math.sin(angle - this.remoteGroup.rotation.y), Math.cos(angle - this.remoteGroup.rotation.y));
+    this.remoteGroup.rotation.y += delta * (1 - Math.exp(-12 * dt));
   }
 
   checkWinner() {
@@ -987,13 +1049,11 @@ export class WaveRunnersGame {
   }
 
   updateAnimation(dt) {
-    const run = this.player.grounded ? Math.abs(this.player.speed) : 0;
-    const swing = Math.sin(this.time * (7 + run * 0.7)) * clamp(run / 8, 0, 1);
-    this.parts.leftArm.rotation.x = swing * 0.9;
-    this.parts.rightArm.rotation.x = -swing * 0.9;
-    this.parts.leftLeg.rotation.x = -swing * 0.95;
-    this.parts.rightLeg.rotation.x = swing * 0.95;
-    this.parts.head.rotation.y = Math.sin(this.time * 2.2) * 0.08;
+    this.animateCharacter(this.parts, this.player.grounded ? Math.abs(this.player.speed) : 0, 0);
+    if (this.remoteGroup?.visible) {
+      const remoteSpeed = this.bot?.speed ?? this.remotePose?.speed ?? 0;
+      this.animateCharacter(this.remoteParts, Math.abs(remoteSpeed), 0.6);
+    }
     for (const trophy of this.trophiesWorld) {
       if (trophy.collected || !trophy.sprite || !trophy.priceSprite) continue;
       const near = Math.hypot(trophy.x - this.player.x, trophy.z - this.player.z) < 3.2;
@@ -1001,6 +1061,15 @@ export class WaveRunnersGame {
       trophy.sprite.position.y = 1.35 + Math.sin(this.time * 3 + trophy.z) * 0.12;
       trophy.priceSprite.position.y = 2.75 + Math.sin(this.time * 3 + trophy.z) * 0.06;
     }
+  }
+
+  animateCharacter(parts, run, phase) {
+    const swing = Math.sin(this.time * (7 + run * 0.7) + phase) * clamp(run / 8, 0, 1);
+    parts.leftArm.rotation.x = swing * 0.9;
+    parts.rightArm.rotation.x = -swing * 0.9;
+    parts.leftLeg.rotation.x = -swing * 0.95;
+    parts.rightLeg.rotation.x = swing * 0.95;
+    parts.head.rotation.y = Math.sin(this.time * 2.2 + phase) * 0.08;
   }
 
   updateCamera(dt) {
@@ -1046,6 +1115,7 @@ export class WaveRunnersGame {
     this.deathFlash = Math.max(0, this.deathFlash - dt * 1.8);
     if (this.phase !== "playing") {
       this.updateCamera(dt);
+      this.updateRemoteVisual(dt);
       this.updateHud();
       this.sendNetworkInput();
       this.updateNetworkHost(dt);
@@ -1062,6 +1132,7 @@ export class WaveRunnersGame {
     this.sendNetworkInput();
     this.updateNetworkHost(dt);
     this.updateWaves(dt);
+    this.updateRemoteVisual(dt);
     this.updateAnimation(dt);
     this.updateCamera(dt);
     this.updateHud();
