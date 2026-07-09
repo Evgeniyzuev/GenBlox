@@ -9,6 +9,14 @@ const seededRandom = (seed) => {
     return value / 4294967296;
   };
 };
+const hashString = (text) => {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
 const PLAYER_MAX_SPEED = 8.7;
 const MAX_GREEN_SURFACE_RUN = 68;
 const GREEN_SAFETY_MARGIN = 1.2;
@@ -29,6 +37,17 @@ const PLAYER_STATES = {
   JUMPING: "JUMPING",
   IN_TRENCH: "IN_TRENCH",
   COLLECTING: "COLLECTING",
+};
+
+const BOT_STATES = {
+  RUNNING: "RUNNING",
+  SEEK_TROPHY: "SEEK_TROPHY",
+  COLLECTING: "COLLECTING",
+  SEEK_TRENCH: "SEEK_TRENCH",
+  IN_TRENCH: "IN_TRENCH",
+  RETURNING_TO_SURFACE: "RETURNING_TO_SURFACE",
+  UPGRADING: "UPGRADING",
+  DEAD_RESET: "DEAD_RESET",
 };
 
 const WAVE_TYPES = [
@@ -71,10 +90,18 @@ export class WaveRunnersGame {
       y: 1.55,
       z: 5,
       angle: 0,
-      speed: 6.1,
+      speed: 0,
       targetX: 3.8,
+      targetZ: 18,
+      state: BOT_STATES.RUNNING,
       collecting: null,
       collectValue: 0,
+      targetTrophy: null,
+      targetTrench: null,
+      speedLevel: 0,
+      collectRateLevel: 0,
+      speedUpgradeCost: 90,
+      collectUpgradeCost: 70,
       box: new THREE.Box3(),
     };
     this.network = callbacks.network ?? null;
@@ -93,6 +120,8 @@ export class WaveRunnersGame {
     this.chunks = new Map();
     this.trenches = [];
     this.trophiesWorld = [];
+    this.trophyRespawns = [];
+    this.scheduledRespawnIds = new Set();
     this.claimedTrophyIds = new Set();
     this.pendingClaimId = null;
     this.waves = [];
@@ -569,10 +598,11 @@ export class WaveRunnersGame {
     }
 
     if (index > 1) {
-      const trophyCount = 2 + Math.floor(rng() * 4) + (rng() < 0.35 ? 2 : 0);
+      const baseTrophyCount = 2 + Math.floor(rng() * 4) + (rng() < 0.35 ? 2 : 0);
+      const trophyCount = Math.max(2, Math.round(baseTrophyCount * 1.2));
       const rowZ = chunkStart + r(8, this.chunkLength - 8);
       for (let item = 0; item < trophyCount; item += 1) {
-        const parallel = item < 4 && rng() < 0.72;
+        const parallel = item < 5 && rng() < 0.72;
         this.spawnTrophy(index, trench, parallel ? rowZ + r(-1.4, 1.4) : null, rng);
       }
     }
@@ -600,7 +630,7 @@ export class WaveRunnersGame {
     };
   }
 
-  spawnTrophy(index, trench, preferredZ = null, rng = Math.random) {
+  spawnTrophy(index, trench, preferredZ = null, rng = Math.random, idSuffix = "") {
     const r = (min, max) => min + rng() * (max - min);
     const chunkStart = index * this.chunkLength;
     let z = preferredZ ?? chunkStart + r(5, this.chunkLength - 5);
@@ -621,8 +651,14 @@ export class WaveRunnersGame {
     const priceSprite = this.createTextSprite(`$${value}`, "#171525", "rgba(183,243,74,.92)", 1.75, 0.55, x, 2.75, z);
     priceSprite.visible = false;
     this.trophyGroup.add(priceSprite);
-    const id = `${index}:${Math.round(z * 10)}:${Math.round(x * 10)}:${symbol}`;
-    this.trophiesWorld.push({ id, sprite, priceSprite, symbol, x: sprite.position.x, z, value, collectNeed, collectedValue: 0, progress: 0, collected: false });
+    const id = `${index}:${Math.round(z * 10)}:${Math.round(x * 10)}:${symbol}${idSuffix}`;
+    if (this.claimedTrophyIds.has(id)) {
+      this.disposeTrophy({ sprite, priceSprite });
+      return null;
+    }
+    const trophy = { id, chunk: index, sprite, priceSprite, symbol, x: sprite.position.x, z, value, collectNeed, collectedValue: 0, progress: 0, collected: false };
+    this.trophiesWorld.push(trophy);
+    return trophy;
   }
 
   trophySymbolForValue(value, rng = Math.random) {
@@ -645,6 +681,30 @@ export class WaveRunnersGame {
     }
   }
 
+  scheduleTrophyRespawn(trophy) {
+    if (!trophy || trophy.chunk <= 1 || this.scheduledRespawnIds.has(trophy.id)) return;
+    this.scheduledRespawnIds.add(trophy.id);
+    const rng = seededRandom(hashString(trophy.id));
+    this.trophyRespawns.push({
+      sourceId: trophy.id,
+      chunk: trophy.chunk,
+      at: this.time + 3.6 + rng() * 4.4,
+    });
+  }
+
+  updateTrophyRespawns() {
+    this.trophyRespawns = this.trophyRespawns.filter((respawn) => {
+      if (this.time < respawn.at) return true;
+      if (!this.chunks.has(respawn.chunk)) return true;
+      const rng = seededRandom(hashString(respawn.sourceId));
+      const trench = this.trenches.find((item) => item.chunk === respawn.chunk) ?? null;
+      const chunkStart = respawn.chunk * this.chunkLength;
+      const z = chunkStart + 5 + rng() * (this.chunkLength - 10);
+      this.spawnTrophy(respawn.chunk, trench, z, rng, `:r${hashString(respawn.sourceId).toString(36)}`);
+      return false;
+    });
+  }
+
   currentTrench(x, z) {
     return this.trenches.find((trench) => z >= trench.z0 && z <= trench.z1 && Math.abs(x - trench.x) <= trench.width / 2) ?? null;
   }
@@ -654,7 +714,8 @@ export class WaveRunnersGame {
   }
 
   spawnWave() {
-    const difficulty = clamp(this.distance / 650, 0, 1);
+    const frontZ = Math.max(this.player.z, this.bot?.z ?? this.player.z);
+    const difficulty = clamp(Math.max(this.distance, frontZ) / 650, 0, 1);
     const roll = Math.random();
     const type = roll < 0.14
       ? WAVE_TYPES[0]
@@ -664,7 +725,7 @@ export class WaveRunnersGame {
           ? WAVE_TYPES[2]
           : WAVE_TYPES[3];
     const speed = type.speed + (type.harmless ? difficulty * 2.5 : difficulty * 7);
-    this.createWaveMesh(type, this.player.z + 150, speed, `${Math.floor(this.time * 1000)}:${type.id}:${this.waves.length}`);
+    this.createWaveMesh(type, frontZ + 150, speed, `${Math.floor(this.time * 1000)}:${type.id}:${this.waves.length}`);
     this.nextWaveIn = Math.max(1.45, (type.interval - difficulty * 1.55) * rand(0.7, 1.3));
   }
 
@@ -751,6 +812,7 @@ export class WaveRunnersGame {
       this.lootValue += trophy.value;
       this.totalScore += trophy.value;
       this.money += trophy.value;
+      this.scheduleTrophyRespawn(trophy);
       this.disposeTrophy(trophy);
       this.spawnHouseTrophy(trophy.symbol);
       this.callbacks.onStatus?.(`${trophy.symbol} claimed: +$${trophy.value}.`);
@@ -846,6 +908,7 @@ export class WaveRunnersGame {
     this.trophiesWorld.forEach((trophy) => {
       if (!trophy.collected && this.claimedTrophyIds.has(trophy.id)) {
         trophy.collected = true;
+        this.scheduleTrophyRespawn(trophy);
         this.disposeTrophy(trophy);
         if (this.collecting === trophy) this.cancelCollect();
       }
@@ -874,48 +937,253 @@ export class WaveRunnersGame {
 
   updateBot(dt) {
     if (!this.bot || this.phase !== "playing" || this.winner) return;
-    if (this.bot.collecting?.collected) this.bot.collecting = null;
-    const nearbyTrophy = this.findBotTrophy();
-    if (!this.bot.collecting && nearbyTrophy && Math.hypot(nearbyTrophy.x - this.bot.x, nearbyTrophy.z - this.bot.z) < COLLECT_RADIUS * 0.95) {
-      this.bot.collecting = nearbyTrophy;
+    if (this.bot.z < 13) this.updateBotUpgrades();
+    if (this.bot.collecting?.collected) {
+      this.bot.collecting = null;
       this.bot.collectValue = 0;
+      this.setBotState(BOT_STATES.RUNNING);
     }
-    if (this.bot.collecting) {
-      this.bot.speed += (0 - this.bot.speed) * (1 - Math.exp(-10 * dt));
-      this.bot.collectValue += BASE_COLLECT_RATE * 0.72 * dt;
-      if (this.bot.collectValue >= this.bot.collecting.collectNeed) {
-        this.claimTrophyForBot(this.bot.collecting);
-        this.bot.collecting = null;
-      }
-      this.bot.y += (this.surfaceY(this.bot.x, this.bot.z) - this.bot.y) * (1 - Math.exp(-12 * dt));
-      return;
+    const dangerWave = this.nearestDangerWaveForBot();
+    const canFinishCurrentCollect = this.bot.collecting && this.canBotFinishCollectBeforeWave(this.bot.collecting, dangerWave);
+    if (dangerWave && this.shouldBotHideFromWave(dangerWave) && !canFinishCurrentCollect) {
+      this.bot.collecting = null;
+      this.bot.collectValue = 0;
+      this.bot.targetTrench = this.findBotSafeTrench(dangerWave);
+      if (this.bot.targetTrench) this.setBotState(BOT_STATES.SEEK_TRENCH);
     }
-    const lead = this.bot.z - this.player.z;
-    const targetSpeed = lead > 18
-      ? 0
-      : lead > 10
-        ? 2.2
-        : 5.6 + clamp(this.distance / 320, 0, 1.8);
-    this.bot.speed += (targetSpeed - this.bot.speed) * (1 - Math.exp(-2.4 * dt));
-    this.bot.targetX = nearbyTrophy?.x ?? (3.8 + Math.sin(this.time * 0.8) * 1.2);
-    const dx = clamp(this.bot.targetX - this.bot.x, -1, 1);
-    this.bot.angle = dx * 0.24 + Math.sin(this.time * 0.45) * 0.05;
-    this.bot.x = clamp(this.bot.x + dx * dt * 5.5, -this.trackWidth / 2 + 1.1, this.trackWidth / 2 - 1.1);
-    this.bot.z = Math.max(5, this.bot.z + Math.cos(this.bot.angle) * this.bot.speed * dt);
-    if (this.bot.z < this.player.z - 16) this.bot.z = this.player.z - 12;
-    this.bot.y += (this.surfaceY(this.bot.x, this.bot.z) - this.bot.y) * (1 - Math.exp(-12 * dt));
+
+    switch (this.bot.state) {
+      case BOT_STATES.SEEK_TRENCH:
+        this.updateBotSeekingTrench(dt, dangerWave);
+        break;
+      case BOT_STATES.IN_TRENCH:
+        this.updateBotInTrench(dt, dangerWave);
+        break;
+      case BOT_STATES.RETURNING_TO_SURFACE:
+        this.updateBotReturningToSurface(dt);
+        break;
+      case BOT_STATES.COLLECTING:
+        this.updateBotCollecting(dt, dangerWave);
+        break;
+      case BOT_STATES.UPGRADING:
+      case BOT_STATES.DEAD_RESET:
+      case BOT_STATES.RUNNING:
+      case BOT_STATES.SEEK_TROPHY:
+      default:
+        this.updateBotRunning(dt, dangerWave);
+        break;
+    }
+    this.updateBotVertical(dt);
   }
 
-  findBotTrophy() {
+  botCollectRate() {
+    return Math.round(BASE_COLLECT_RATE * (1.3 ** this.bot.collectRateLevel));
+  }
+
+  botMaxSpeed() {
+    return PLAYER_MAX_SPEED * (1.12 ** this.bot.speedLevel) * 0.96;
+  }
+
+  setBotState(state) {
+    if (!this.bot || this.bot.state === state) return;
+    this.bot.state = state;
+  }
+
+  updateBotRunning(dt, dangerWave) {
+    if (!this.bot) return;
+    if (dangerWave && this.shouldBotHideFromWave(dangerWave)) {
+      this.bot.targetTrench = this.findBotSafeTrench(dangerWave);
+      if (this.bot.targetTrench) {
+        this.setBotState(BOT_STATES.SEEK_TRENCH);
+        this.updateBotSeekingTrench(dt, dangerWave);
+        return;
+      }
+    }
+    const trophy = this.findBotTargetTrophy();
+    this.bot.targetTrophy = trophy;
+    if (trophy) {
+      this.setBotState(BOT_STATES.SEEK_TROPHY);
+      this.moveBotToward(trophy.x, trophy.z, dt, 0.96);
+      if (Math.hypot(trophy.x - this.bot.x, trophy.z - this.bot.z) < COLLECT_RADIUS * 0.9) {
+        this.bot.collecting = trophy;
+        this.bot.collectValue = 0;
+        this.setBotState(BOT_STATES.COLLECTING);
+      }
+      return;
+    }
+    this.setBotState(BOT_STATES.RUNNING);
+    this.moveBotToward(Math.sin(this.time * 0.7) * 3.2, this.bot.z + 24, dt, 0.78);
+  }
+
+  updateBotCollecting(dt, dangerWave) {
+    const trophy = this.bot.collecting;
+    if (!trophy || trophy.collected || this.surfaceY(this.bot.x, this.bot.z) < 1) {
+      this.bot.collecting = null;
+      this.bot.collectValue = 0;
+      this.setBotState(BOT_STATES.RUNNING);
+      return;
+    }
+    if (dangerWave && !this.canBotFinishCollectBeforeWave(trophy, dangerWave)) {
+      this.bot.collecting = null;
+      this.bot.collectValue = 0;
+      this.bot.targetTrench = this.findBotSafeTrench(dangerWave);
+      this.setBotState(this.bot.targetTrench ? BOT_STATES.SEEK_TRENCH : BOT_STATES.RUNNING);
+      return;
+    }
+    this.bot.speed += (0 - this.bot.speed) * (1 - Math.exp(-10 * dt));
+    this.bot.collectValue += this.botCollectRate() * dt;
+    if (this.bot.collectValue >= trophy.collectNeed) {
+      this.claimTrophyForBot(trophy);
+      this.bot.collecting = null;
+      this.bot.collectValue = 0;
+      this.setBotState(BOT_STATES.RUNNING);
+    }
+  }
+
+  updateBotSeekingTrench(dt, dangerWave) {
+    const safe = this.bot.targetTrench ?? (dangerWave ? this.findBotSafeTrench(dangerWave) : null);
+    if (!safe) {
+      this.setBotState(BOT_STATES.RUNNING);
+      this.updateBotRunning(dt, dangerWave);
+      return;
+    }
+    this.bot.targetTrench = safe;
+    this.moveBotToward(safe.x, safe.z, dt, 1.08);
+    if (this.surfaceY(this.bot.x, this.bot.z) < 1 && Math.hypot(this.bot.x - safe.x, this.bot.z - safe.z) < Math.max(1.6, safe.width * 0.2)) {
+      this.bot.speed += (0 - this.bot.speed) * (1 - Math.exp(-8 * dt));
+      this.setBotState(BOT_STATES.IN_TRENCH);
+    }
+  }
+
+  updateBotInTrench(dt, dangerWave) {
+    this.bot.speed += (0 - this.bot.speed) * (1 - Math.exp(-8 * dt));
+    if (dangerWave && dangerWave.timeToWave > -0.8) return;
+    const exitZ = this.bot.targetTrench ? this.bot.targetTrench.z1 + 2.4 : this.bot.z + 6;
+    this.bot.targetZ = exitZ;
+    this.setBotState(BOT_STATES.RETURNING_TO_SURFACE);
+  }
+
+  updateBotReturningToSurface(dt) {
+    this.moveBotToward(this.bot.targetTrench?.x ?? 0, this.bot.targetZ, dt, 0.78);
+    if (this.surfaceY(this.bot.x, this.bot.z) > 1) {
+      this.bot.targetTrench = null;
+      this.setBotState(BOT_STATES.RUNNING);
+    }
+  }
+
+  updateBotVertical(dt) {
+    this.bot.y += (this.surfaceY(this.bot.x, this.bot.z) - this.bot.y) * (1 - Math.exp(-14 * dt));
+  }
+
+  moveBotToward(targetX, targetZ, dt, speedScale = 1) {
+    const dx = targetX - this.bot.x;
+    const dz = targetZ - this.bot.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance < 0.05) {
+      this.bot.speed += (0 - this.bot.speed) * (1 - Math.exp(-8 * dt));
+      return;
+    }
+    const desiredSpeed = this.botMaxSpeed() * speedScale;
+    this.bot.speed += (desiredSpeed - this.bot.speed) * (1 - Math.exp(-4.5 * dt));
+    const step = Math.min(distance, this.bot.speed * dt);
+    this.bot.x = clamp(this.bot.x + (dx / distance) * step, -this.trackWidth / 2 + 1.1, this.trackWidth / 2 - 1.1);
+    this.bot.z = Math.max(0, this.bot.z + (dz / distance) * step);
+    this.bot.angle = Math.atan2(dx, dz);
+    this.bot.targetX = targetX;
+    this.bot.targetZ = targetZ;
+  }
+
+  findBotTargetTrophy() {
     if (!this.bot) return null;
-    const candidates = this.trophiesWorld
-      .filter((trophy) => !trophy.collected && trophy.z >= this.bot.z - 1 && trophy.z <= this.bot.z + 18 && this.surfaceY(trophy.x, trophy.z) > 1)
-      .sort((a, b) => {
-        const da = Math.abs(a.z - this.bot.z) + Math.abs(a.x - this.bot.x) * 0.7;
-        const db = Math.abs(b.z - this.bot.z) + Math.abs(b.x - this.bot.x) * 0.7;
-        return da - db;
-      });
-    return candidates[0] ?? null;
+    const wave = this.nearestDangerWaveForBot();
+    let best = null;
+    let bestScore = -Infinity;
+    for (const trophy of this.trophiesWorld) {
+      if (trophy.collected || this.surfaceY(trophy.x, trophy.z) < 1) continue;
+      if (trophy.z < this.bot.z - 4 || trophy.z > this.bot.z + 58) continue;
+      const travelDistance = Math.hypot(trophy.x - this.bot.x, trophy.z - this.bot.z);
+      const travelTime = travelDistance / Math.max(1, this.botMaxSpeed());
+      const collectTime = trophy.collectNeed / Math.max(1, this.botCollectRate());
+      if (wave) {
+        const timeToWaveAtTrophy = (wave.mesh.position.z - trophy.z) / wave.speed;
+        if (timeToWaveAtTrophy < travelTime + collectTime + 0.35) continue;
+      }
+      const score = trophy.value / Math.max(1, travelTime + collectTime) - travelDistance * 0.18;
+      if (score > bestScore) {
+        best = trophy;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  findBotSafeTrench(wave) {
+    if (!this.bot || !wave) return null;
+    let best = null;
+    let bestScore = Infinity;
+    for (const trench of this.trenches) {
+      if (trench.z1 < this.bot.z - 16 || trench.z0 > wave.mesh.position.z + 6) continue;
+      const targetZ = clamp(this.bot.z, trench.z0 + 1.2, trench.z1 - 1.2);
+      const targetX = trench.x;
+      const distance = Math.hypot(targetX - this.bot.x, targetZ - this.bot.z);
+      const timeToReach = distance / Math.max(1, this.botMaxSpeed() * 1.08) + 0.45;
+      const timeToWave = (wave.mesh.position.z - targetZ) / wave.speed;
+      if (timeToWave < timeToReach + 0.45) continue;
+      const score = timeToReach + Math.max(0, targetZ - this.bot.z) * 0.015;
+      if (score < bestScore) {
+        best = { ...trench, x: targetX, z: targetZ, timeToReach, timeToWave };
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  nearestDangerWaveForBot() {
+    if (!this.bot) return null;
+    let nearest = null;
+    for (const wave of this.waves) {
+      if (wave.type.harmless) continue;
+      const timeToWave = (wave.mesh.position.z - this.bot.z) / wave.speed;
+      if (timeToWave < -1.2 || timeToWave > 9.5) continue;
+      if (!nearest || timeToWave < nearest.timeToWave) nearest = { ...wave, timeToWave };
+    }
+    return nearest;
+  }
+
+  shouldBotHideFromWave(wave) {
+    if (!wave || this.bot.z < 12 || this.isBotSafeInTrench()) return false;
+    const safeTrench = this.findBotSafeTrench(wave);
+    if (!safeTrench) return wave.timeToWave < 2.2;
+    return wave.timeToWave < safeTrench.timeToReach + 1.05;
+  }
+
+  canBotFinishCollectBeforeWave(trophy, wave) {
+    if (!wave) return true;
+    const remaining = Math.max(0, trophy.collectNeed - this.bot.collectValue);
+    const collectTime = remaining / Math.max(1, this.botCollectRate());
+    const timeToWorkSpot = (wave.mesh.position.z - trophy.z) / wave.speed;
+    return timeToWorkSpot > collectTime + 0.35;
+  }
+
+  updateBotUpgrades() {
+    if (!this.bot) return;
+    let upgraded = false;
+    while (this.bot.money >= this.bot.collectUpgradeCost) {
+      this.bot.money -= this.bot.collectUpgradeCost;
+      this.bot.collectRateLevel += 1;
+      this.bot.collectUpgradeCost = Math.round(this.bot.collectUpgradeCost * 1.3 + 18);
+      upgraded = true;
+    }
+    while (this.bot.money >= this.bot.speedUpgradeCost) {
+      this.bot.money -= this.bot.speedUpgradeCost;
+      this.bot.speedLevel += 1;
+      this.bot.speedUpgradeCost = Math.round(this.bot.speedUpgradeCost * 1.32 + 20);
+      upgraded = true;
+    }
+    if (upgraded) {
+      this.setBotState(BOT_STATES.UPGRADING);
+      this.callbacks.onStatus?.(`${this.bot.name} upgraded: TAKE $${this.botCollectRate()}/s, SPEED ${this.botMaxSpeed().toFixed(1)}.`);
+    }
   }
 
   claimTrophyForBot(trophy) {
@@ -924,6 +1192,10 @@ export class WaveRunnersGame {
     this.claimedTrophyIds.add(trophy.id);
     this.bot.score += trophy.value;
     this.bot.money += trophy.value;
+    this.bot.targetTrophy = null;
+    this.bot.collecting = null;
+    this.bot.collectValue = 0;
+    this.scheduleTrophyRespawn(trophy);
     this.disposeTrophy(trophy);
     this.callbacks.onStatus?.(`${this.bot.name} collected ${trophy.symbol}: +$${trophy.value}.`);
     this.checkWinner();
@@ -1076,6 +1348,7 @@ export class WaveRunnersGame {
       if (botBox && wave.box.intersectsBox(botBox)) {
         if (!wave.type.harmless && this.bot.z >= 12 && !this.isBotSafeInTrench()) {
           this.dieBot(wave.type.label);
+          botBox = null;
         }
       }
       if (wave.box.intersectsBox(playerBox)) {
@@ -1123,13 +1396,15 @@ export class WaveRunnersGame {
     this.player.inTrench = false;
     this.collecting = null;
     this.distance = 0;
-    for (const wave of this.waves) {
-      this.waveGroup.remove(wave.mesh);
-      wave.mesh.geometry.dispose();
-      wave.mesh.material.dispose();
+    if (!this.bot) {
+      for (const wave of this.waves) {
+        this.waveGroup.remove(wave.mesh);
+        wave.mesh.geometry.dispose();
+        wave.mesh.material.dispose();
+      }
+      this.waves = [];
+      this.nextWaveIn = 2.4;
     }
-    this.waves = [];
-    this.nextWaveIn = 2.4;
   }
 
   dieBot(label) {
@@ -1141,8 +1416,13 @@ export class WaveRunnersGame {
     this.bot.angle = 0;
     this.bot.speed = 0;
     this.bot.targetX = 3.8;
+    this.bot.targetZ = 18;
+    this.bot.targetTrophy = null;
+    this.bot.targetTrench = null;
     this.bot.collecting = null;
     this.bot.collectValue = 0;
+    this.setBotState(BOT_STATES.DEAD_RESET);
+    this.updateBotUpgrades();
   }
 
   updateAnimation(dt) {
@@ -1225,6 +1505,7 @@ export class WaveRunnersGame {
     this.updateInput(dt);
     this.updatePhysics(dt);
     this.generateChunksAround(this.player.z, this.bot?.z ?? this.player.z);
+    this.updateTrophyRespawns();
     this.updateBaseInteraction();
     this.updateCollecting(dt);
     this.updateBot(dt);
