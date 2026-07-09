@@ -181,6 +181,8 @@ export class WaveRunnersGame {
     this.networkClock = 0;
     this.remoteRanking = [];
     this.remotePose = null;
+    this.lastNetworkRevision = null;
+    this.lastNetworkHostTime = -Infinity;
     this.lastInputMove = 0;
     this.mobileInput = {
       active: false,
@@ -935,6 +937,15 @@ export class WaveRunnersGame {
     return Math.max(1.45, (basis.interval - difficulty * 1.55) * this.selectedMap.waveIntervalMultiplier * rand(0.7, 1.3));
   }
 
+  ensureWaveQueueFilled() {
+    if (this.phase !== "playing") return;
+    this.waveQueue.fill(
+      this.time,
+      (at) => this.makeWaveEvent(at),
+      () => this.nextWaveDelay(),
+    );
+  }
+
   spawnWave(event = null) {
     const waveEvent = event ?? this.makeWaveEvent(this.time);
     const frontZ = Math.max(this.player.z, this.bot?.z ?? this.player.z);
@@ -1080,6 +1091,7 @@ export class WaveRunnersGame {
   publishSnapshot(force = false) {
     if (!this.network || this.networkRole !== "host") return;
     this.refreshHumanSlotsFromNetwork();
+    this.ensureWaveQueueFilled();
     this.netcode.publish({
       phase: this.phase,
       mapId: this.selectedMap.id,
@@ -1102,6 +1114,14 @@ export class WaveRunnersGame {
 
   applyNetworkSnapshot(snapshot) {
     if (!snapshot || snapshot.kind !== "wave-runners" || this.networkRole !== "guest") return;
+    const incomingHostTime = Number(snapshot.hostTime) || 0;
+    const incomingRevision = snapshot.revision ?? incomingHostTime;
+    const isFreshSnapshot = this.lastNetworkRevision !== incomingRevision || incomingHostTime > this.lastNetworkHostTime + 0.001;
+    if (isFreshSnapshot) {
+      this.lastNetworkRevision = incomingRevision;
+      this.lastNetworkHostTime = Math.max(this.lastNetworkHostTime, incomingHostTime);
+      this.networkQueueExpired = false;
+    }
     this.targetScore = snapshot.targetScore ?? this.targetScore;
     const snapshotSlots = this.normalizeHumanSlots(snapshot.humanSlots ?? []);
     if (snapshotSlots.length > 0 && this.humanSlotsKey(snapshotSlots) !== this.humanSlotsKey()) {
@@ -1127,8 +1147,10 @@ export class WaveRunnersGame {
     }
     if (snapshot.phase === "finished") this.phase = "finished";
     (snapshot.claimed ?? []).forEach((id) => this.claimedTrophyIds.add(id));
-    this.waveQueue.sync(snapshot.wavePlan ?? [], snapshot.hostTime ?? this.time);
-    this.reconcileNetworkWaves(snapshot.waves ?? []);
+    if (isFreshSnapshot) {
+      this.waveQueue.sync(snapshot.wavePlan ?? [], incomingHostTime || this.time);
+      this.reconcileNetworkWaves(snapshot.waves ?? []);
+    }
     this.reconcileClaimedTrophies();
   }
 
@@ -1555,11 +1577,7 @@ export class WaveRunnersGame {
 
   updateWaves(dt) {
     if (this.networkRole !== "guest") {
-      this.waveQueue.fill(
-        this.time,
-        (at) => this.makeWaveEvent(at),
-        () => this.nextWaveDelay(),
-      );
+      this.ensureWaveQueueFilled();
       this.waveQueue.takeDue(this.time).forEach((event) => this.spawnWave(event));
     } else {
       const hostTime = this.waveQueue.estimateHostTime();
