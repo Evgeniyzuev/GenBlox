@@ -202,6 +202,10 @@ export class WaveRunnersGame {
     this.lastNetworkRevision = null;
     this.lastNetworkHostTime = -Infinity;
     this.lastInputMove = 0;
+    this.bumpSerial = 0;
+    this.pendingBumpTargetId = null;
+    this.lastProcessedBumpSeq = new Map();
+    this.remoteBumpCooldown = 0;
     this.mobileInput = {
       active: false,
       pointerId: null,
@@ -655,6 +659,9 @@ export class WaveRunnersGame {
     this.playerGroup.rotation.z = 0;
     this.impactState = null;
     this.impacts = [];
+    this.pendingBumpTargetId = null;
+    this.remoteBumpCooldown = 0;
+    this.lastProcessedBumpSeq.clear();
     this.collecting = null;
     this.claimedTrophyIds.clear();
     this.pendingClaimId = null;
@@ -1402,16 +1409,32 @@ export class WaveRunnersGame {
   updateRunnerBumpCooldowns(dt) {
     this.player.bumpCooldown = Math.max(0, (this.player.bumpCooldown ?? 0) - dt);
     if (this.bot) this.bot.bumpCooldown = Math.max(0, (this.bot.bumpCooldown ?? 0) - dt);
+    this.remoteBumpCooldown = Math.max(0, this.remoteBumpCooldown - dt);
   }
 
   updatePlayerBumpAction() {
-    if (!this.bot || !this.remoteGroup?.visible) return;
     const action = this.keys.has("e") || this.mobileInput.action;
     if (!action || this.nearbyUpgradeMachine()) return;
-    if (this.bumpRunner(this.player, this.bot)) {
+    if (this.bot && this.remoteGroup?.visible && this.bumpRunner(this.player, this.bot)) {
       this.cancelCollect();
       this.callbacks.onStatus?.(`${this.bot.name} got bumped.`);
+      return;
     }
+    const remote = this.remoteRunnerEntry();
+    if (!remote?.pose || this.remoteBumpCooldown > 0) return;
+    if (this.canBumpRunner(this.player, { ...remote.pose, bumpCooldown: this.remoteBumpCooldown })) {
+      this.remoteBumpCooldown = RUNNER_BUMP_COOLDOWN;
+      this.pendingBumpTargetId = remote.id;
+      this.bumpSerial += 1;
+      this.cancelCollect();
+      this.playSound("jump");
+      this.sendNetworkInput(true);
+      this.callbacks.onStatus?.(`${remote.name ?? "Player"} got bumped.`);
+    }
+  }
+
+  remoteRunnerEntry() {
+    return this.remoteRanking.find((entry) => entry.id !== this.playerId && entry.pose) ?? null;
   }
 
   maybeBotBumpPlayer(dangerWave) {
@@ -1439,8 +1462,26 @@ export class WaveRunnersGame {
       targetScore: this.targetScore,
       mapId: this.selectedMap.id,
       pose: this.playerPose(),
+      bumpTargetId: this.pendingBumpTargetId,
+      bumpSeq: this.bumpSerial,
     });
     this.pendingClaimId = null;
+  }
+
+  processNetworkBumps() {
+    if (!this.network) return;
+    this.netcode.getInputs().forEach((entry) => {
+      const value = entry.value;
+      if (!value || entry.playerId === this.playerId || value.bumpTargetId !== this.playerId) return;
+      const seq = Number(value.bumpSeq) || 0;
+      if (seq <= (this.lastProcessedBumpSeq.get(entry.playerId) ?? 0)) return;
+      this.lastProcessedBumpSeq.set(entry.playerId, seq);
+      if (this.forceRunnerJump(this.player)) {
+        this.cancelCollect();
+        this.playSound("jump");
+        this.callbacks.onStatus?.(`${this.playerName(entry.playerId)} bumped you.`);
+      }
+    });
   }
 
   updateNetworkHost(dt) {
@@ -2337,6 +2378,7 @@ export class WaveRunnersGame {
       return;
     }
     this.updateRunnerBumpCooldowns(dt);
+    this.processNetworkBumps();
     this.updateInput(dt);
     const wasLocalImpacted = this.isRunnerImpacted(this.player);
     this.updateImpact(dt);
