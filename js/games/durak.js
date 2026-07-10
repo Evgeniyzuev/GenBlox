@@ -152,6 +152,39 @@ function throwerCandidates(game, from) {
   return candidates;
 }
 
+function afterSuccessfulDefense(game, defenderIndex) {
+  if (game.table.length >= attackLimit(game)) return completeDefense(game);
+  const attackerCanThrow = legalAttackCards(game, game.attacker).length > 0;
+  if (!game.options.throwIn) {
+    return attackerCanThrow
+      ? {
+          ...game,
+          turn: game.attacker,
+        }
+      : completeDefense(game);
+  }
+
+  const withEmptyAttackerSkipped = attackerCanThrow || game.passedThrowers.includes(game.attacker)
+    ? game
+    : {
+        ...game,
+        passedThrowers: [...new Set([...(game.passedThrowers ?? []), game.attacker])],
+      };
+
+  if (attackerCanThrow && !withEmptyAttackerSkipped.passedThrowers.includes(game.attacker)) {
+    return {
+      ...withEmptyAttackerSkipped,
+      turn: game.attacker,
+    };
+  }
+  const nextThrower = throwerCandidates(withEmptyAttackerSkipped, defenderIndex)[0];
+  if (nextThrower === undefined) return completeDefense(withEmptyAttackerSkipped);
+  return {
+    ...withEmptyAttackerSkipped,
+    turn: nextThrower,
+  };
+}
+
 function completeDefense(game) {
   const count = playerCount(game);
   const otherPlayers = Array.from({ length: count }, (_, index) => index)
@@ -255,7 +288,7 @@ export function playDurakCard(game, cardId, playerIndex) {
       turn: game.defender,
       selectedAttack: card.id,
       defenderHandAtStart: startsBattle ? game.players[game.defender]?.hand.length ?? HAND_LIMIT : game.defenderHandAtStart,
-      passedThrowers: [],
+      passedThrowers: startsBattle ? [] : game.passedThrowers,
       revision: game.revision + 1,
     };
   }
@@ -268,12 +301,11 @@ export function playDurakCard(game, cardId, playerIndex) {
     ...game,
     players,
     table,
-    turn: game.attacker,
     selectedAttack: null,
     revision: game.revision + 1,
   };
 
-  return players[playerIndex].hand.length === 0 ? completeDefense(defended) : defended;
+  return players[playerIndex].hand.length === 0 ? completeDefense(defended) : afterSuccessfulDefense(defended, playerIndex);
 }
 
 export function passDurak(game, playerIndex) {

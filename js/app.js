@@ -375,6 +375,12 @@ function roomHumanSeatCount(game = null, gameId = activeGameId) {
   return isRoomLikeMode() ? roomGameSeats(game, gameId).length : 1;
 }
 
+function isRoomAutomationController(game = null, gameId = activeGameId) {
+  if (!client || !isRoomLikeMode()) return false;
+  const connectedSeat = roomGameSeats(game, gameId).find((seat) => seat?.playerId && playerById(seat.playerId));
+  return connectedSeat ? connectedSeat.playerId === client.playerId : client.isHost;
+}
+
 function attachRoomSeats(game, previous = null, gameId = activeGameId) {
   if (!isRoomLikeMode() || isRealtimeGame(gameId)) return game;
   const seats = Array.isArray(previous?.seats) && previous.seats.length
@@ -602,7 +608,7 @@ function syncRoom() {
     const needsDurakMigration = activeGameId === "durak" && isDurakState(game)
       && (!game.options || !Array.isArray(game.scores) || !Array.isArray(game.passedThrowers) || !Object.hasOwn(game, "defenderHandAtStart"));
     if (needsSeatMigration || needsDurakMigration) {
-      if (client.isHost) {
+      if (client.isHost || isRoomAutomationController(game)) {
         const options = activeGameId === "durak" ? normalizeDurakOptions(game.options) : null;
         client.setGameState(activeGameId, {
           ...game,
@@ -1129,7 +1135,7 @@ function playDurakAction(action, cardId = null) {
     queueComputerMove();
   } else {
     client.setGameState(activeGameId, next);
-    if (client?.isHost) setTimeout(queueComputerMove, 0);
+    setTimeout(queueComputerMove, 0);
   }
 }
 
@@ -1139,8 +1145,22 @@ function queueComputerMove() {
   if (activeGameId === "durak") {
     if (!isDurakState(game) || game.winner !== null) return;
     const humanSeats = roomHumanSeatCount(game);
+    const actions = getDurakActions(game, game.turn);
+    const emptyTurnCanOnlyPass = actions.canPass && (game.players[game.turn]?.hand.length ?? 0) === 0;
+    if (emptyTurnCanOnlyPass) {
+      if (mode === "room" && !isRoomAutomationController(game)) return;
+      const next = passDurak(game, game.turn);
+      if (next === game) return;
+      if (mode === "room") client.setGameState(activeGameId, next);
+      else {
+        localGame = next;
+        renderGame(localGame, localGame.options.playerCount, 0);
+        queueComputerMove();
+      }
+      return;
+    }
     const botTurn = game.turn >= humanSeats;
-    if (!botTurn || (mode === "room" && !client?.isHost)) return;
+    if (!botTurn || (mode === "room" && !isRoomAutomationController(game))) return;
     if (computerTimer) return;
     elements.gameStatus.textContent = `Seat ${game.turn + 1} bot is thinking...`;
     computerTimer = setTimeout(() => {
