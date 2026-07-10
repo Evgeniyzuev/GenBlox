@@ -812,7 +812,7 @@ function openSoloGame(gameId) {
   elements.hint.textContent = "Close the game to return to the catalog.";
   lastRevision = -1;
   openOverlay(elements.gameDialog, "game");
-  renderGame(localGame, 2, humanSide);
+  renderGame(localGame, activeGameId === "durak" ? 4 : 2, humanSide);
   queueComputerMove();
 }
 
@@ -986,6 +986,7 @@ function makeReversiMove(index) {
     queueComputerMove();
   } else {
     client.setGameState(activeGameId, next);
+    if (client?.isHost) setTimeout(queueComputerMove, 0);
   }
 }
 
@@ -1016,7 +1017,7 @@ function queueComputerMove() {
     const botTurn = game.turn >= humanSeats;
     if (!botTurn || (mode === "room" && !client?.isHost)) return;
     if (computerTimer) return;
-    elements.gameStatus.textContent = "Bot is thinking...";
+    elements.gameStatus.textContent = `Seat ${game.turn + 1} bot is thinking...`;
     computerTimer = setTimeout(() => {
       computerTimer = null;
       const current = mode === "room" ? client?.getGameState(activeGameId) : localGame;
