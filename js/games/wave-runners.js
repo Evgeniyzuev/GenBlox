@@ -33,6 +33,7 @@ const MATCH_TARGETS = [20000, 50000, 100000, 200000, 500000, 1000000];
 const PLAYER_COUNT_OPTIONS = [2, 3, 4, 5, 6];
 const MAX_ACTIVE_TROPHIES = 180;
 const TROPHY_RESPAWN_INTERVAL = 30;
+const TROPHY_RESPAWN_ATTEMPTS = 8;
 const WAVE_QUEUE_SECONDS = 30;
 const PLAYER_COLORS = [0x4aa7ff, 0xff8a3d, 0xb7f34a, 0xff668c, 0x9478ff, 0xffd36a];
 const PLAYER_HAIR_COLORS = [0x2b1f27, 0x412f18, 0x1d3722, 0x59283a, 0x262450, 0x5c3b15];
@@ -1130,14 +1131,7 @@ export class WaveRunnersGame {
         this.trophyStock.delete(index);
       }
     }
-    const trailingZ = Math.min(z, extraZ);
-    this.trophiesWorld = this.trophiesWorld.filter((trophy) => {
-      if (trophy.z < trailingZ - 24 || trophy.collected) {
-        this.disposeTrophy(trophy);
-        return false;
-      }
-      return true;
-    });
+    this.cleanupTrophies(Math.min(z, extraZ) - 24);
   }
 
   createChunk(index) {
@@ -1235,7 +1229,7 @@ export class WaveRunnersGame {
   }
 
   spawnTrophy(index, trench, preferredZ = null, rng = Math.random, idSuffix = "") {
-    if (this.trophiesWorld.length >= MAX_ACTIVE_TROPHIES) return null;
+    if (this.activeTrophyCount() >= MAX_ACTIVE_TROPHIES) return null;
     const r = (min, max) => min + rng() * (max - min);
     const chunkStart = index * this.chunkLength;
     const avoidTrench = (x, z) => {
@@ -1307,21 +1301,43 @@ export class WaveRunnersGame {
     }
   }
 
+  activeTrophyCount() {
+    return this.trophiesWorld.reduce((count, trophy) => count + (!trophy.collected && trophy.sprite ? 1 : 0), 0);
+  }
+
+  cleanupTrophies(minZ = -Infinity) {
+    this.trophiesWorld = this.trophiesWorld.filter((trophy) => {
+      const stale = trophy.collected || !trophy.sprite || trophy.z < minZ || !this.chunks.has(trophy.chunk);
+      if (stale) {
+        this.disposeTrophy(trophy);
+        return false;
+      }
+      return true;
+    });
+  }
+
   updateTrophyRespawns() {
+    this.cleanupTrophies(this.trailingRunnerZ() - 24);
+    let activeTotal = this.activeTrophyCount();
     for (const [chunk, stock] of this.trophyStock.entries()) {
       if (!this.chunks.has(chunk) || chunk <= 1 || stock.initial <= 0) continue;
       if (this.time - stock.lastRespawn < TROPHY_RESPAWN_INTERVAL) continue;
       stock.lastRespawn = this.time;
-      const active = this.trophiesWorld.filter((trophy) => trophy.chunk === chunk && !trophy.collected).length;
-      if (active >= stock.initial || this.trophiesWorld.length >= MAX_ACTIVE_TROPHIES) continue;
-      const amount = active < stock.initial / 2 ? 2 : 1;
+      const active = this.trophiesWorld.filter((trophy) => trophy.chunk === chunk && !trophy.collected && trophy.sprite).length;
+      const missing = stock.initial - active;
+      if (missing <= 0 || activeTotal >= MAX_ACTIVE_TROPHIES) continue;
+      const amount = Math.min(missing, active < stock.initial / 2 ? 2 : 1, MAX_ACTIVE_TROPHIES - activeTotal);
       const trench = this.trenches.find((item) => item.chunk === chunk) ?? null;
-      for (let index = 0; index < amount && this.trophiesWorld.length < MAX_ACTIVE_TROPHIES; index += 1) {
+      let spawned = 0;
+      for (let index = 0; spawned < amount && index < amount * TROPHY_RESPAWN_ATTEMPTS && activeTotal < MAX_ACTIVE_TROPHIES; index += 1) {
         const seed = hashString(`${this.selectedMap.id}:${chunk}:${Math.floor(this.time / TROPHY_RESPAWN_INTERVAL)}:${index}`);
         const rng = seededRandom(seed);
         const chunkStart = chunk * this.chunkLength;
         const z = chunkStart + 5 + rng() * (this.chunkLength - 10);
-        this.spawnTrophy(chunk, trench, z, rng, `:r${seed.toString(36)}`);
+        if (this.spawnTrophy(chunk, trench, z, rng, `:r${seed.toString(36)}`)) {
+          spawned += 1;
+          activeTotal += 1;
+        }
       }
     }
   }
