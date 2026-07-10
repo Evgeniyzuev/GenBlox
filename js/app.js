@@ -31,11 +31,14 @@ import {
   playReversiMove,
 } from "./games/reversi.js";
 import {
+  DEFAULT_DURAK_OPTIONS,
+  DURAK_PLAYER_RANGE,
   cardText,
   chooseDurakBotAction,
   createDurakGame,
   getDurakActions,
   isDurakState,
+  normalizeDurakOptions,
   passDurak,
   playDurakCard,
   takeDurak,
@@ -252,6 +255,7 @@ let microGame = null;
 let waveGame = null;
 let playerProfile = loadPlayerProfile();
 let lastPublishedProfile = "";
+let pendingDurakOptions = null;
 
 function normalizeGameId(gameId) {
   const aliases = {
@@ -327,7 +331,13 @@ function playerById(playerId) {
 }
 
 function seatLimitForGame(gameId = activeGameId) {
-  return gameId === "durak" ? 4 : 2;
+  if (gameId !== "durak") return 2;
+  const stateOptions = client?.getGameState?.("durak")?.options;
+  return normalizeDurakOptions(pendingDurakOptions ?? stateOptions ?? DEFAULT_DURAK_OPTIONS).playerCount;
+}
+
+function minDurakPlayers() {
+  return mode === "room" ? Math.min(Math.max(client?.playerCount ?? 1, DURAK_PLAYER_RANGE.MIN), DURAK_PLAYER_RANGE.MAX) : DURAK_PLAYER_RANGE.MIN;
 }
 
 function createRoomSeats(limit = seatLimitForGame()) {
@@ -584,11 +594,18 @@ function syncRoom() {
     setupRoomLabels();
     openOverlay(elements.gameDialog, "game");
     const game = client.getGameState(activeGameId);
-    if (!isRealtimeGame(activeGameId) && isValidGameState(game) && !roomGameSeats(game).length) {
+    const needsSeatMigration = !isRealtimeGame(activeGameId) && isValidGameState(game) && !roomGameSeats(game).length;
+    const needsDurakMigration = activeGameId === "durak" && isDurakState(game)
+      && (!game.options || !Array.isArray(game.scores) || !Array.isArray(game.passedThrowers));
+    if (needsSeatMigration || needsDurakMigration) {
       if (client.isHost) {
+        const options = activeGameId === "durak" ? normalizeDurakOptions(game.options) : null;
         client.setGameState(activeGameId, {
           ...game,
-          seats: createRoomSeats(seatLimitForGame(activeGameId)),
+          ...(options ? { options } : {}),
+          ...(activeGameId === "durak" && !Array.isArray(game.scores) ? { scores: Array(game.players.length).fill(0) } : {}),
+          ...(activeGameId === "durak" && !Array.isArray(game.passedThrowers) ? { passedThrowers: [] } : {}),
+          seats: roomGameSeats(game).length ? roomGameSeats(game) : createRoomSeats(seatLimitForGame(activeGameId)),
           revision: game.revision + 1,
         });
       }
@@ -698,9 +715,10 @@ function setupRoomLabels() {
     return;
   }
   if (activeGameId === "durak") {
+    const game = client?.getGameState("durak");
     const side = roomPlayerSide();
     elements.role.textContent = side === null ? "Spectating" : `Seat ${side + 1}`;
-    elements.players.textContent = `Players: ${roomHumanSeatCount()} / 4`;
+    elements.players.textContent = `Players: ${roomHumanSeatCount(game)} / ${game?.options?.playerCount ?? seatLimitForGame("durak")}`;
     elements.nameX.textContent = roomGameSeats()[0]?.name ?? profileForPlayer(playerByIndex(0), "Room Host");
     elements.nameO.textContent = "Card table";
     elements.newRound.hidden = !client.isHost;
@@ -814,7 +832,7 @@ function createGameForActive(previous = null) {
     return attachRoomSeats(createReversiGame(validPrevious), validPrevious);
   }
   if (activeGameId === "durak") {
-    const game = createDurakGame(isDurakState(previous) ? previous : null);
+    const game = createDurakGame(isDurakState(previous) ? previous : null, pendingDurakOptions);
     return attachRoomSeats(game, isDurakState(previous) ? previous : null);
   }
   const validPrevious = isGameState(previous) ? previous : null;
@@ -861,6 +879,22 @@ function openSoloGame(gameId) {
     elements.gameDialog.requestFullscreen?.()
       .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
       .catch(() => {});
+    return;
+  }
+  if (activeGameId === "durak") {
+    pendingDurakOptions = normalizeDurakOptions({
+      ...DEFAULT_DURAK_OPTIONS,
+      playerCount: Math.max(DEFAULT_DURAK_OPTIONS.playerCount, minDurakPlayers()),
+    });
+    setupGameShell();
+    elements.role.textContent = "Table setup";
+    elements.players.textContent = "Solo with bots";
+    elements.nameX.textContent = `${playerProfile.avatar} ${playerProfile.name}`;
+    elements.nameO.textContent = "Bots fill empty seats";
+    elements.newRound.hidden = true;
+    elements.hint.textContent = "Choose table settings before dealing.";
+    openOverlay(elements.gameDialog, "game");
+    renderDurakSetup();
     return;
   }
   localGame = createGameForActive(null);
@@ -952,6 +986,18 @@ function launchForRoom(gameId) {
     elements.gameDialog.requestFullscreen?.()
       .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
       .catch(() => {});
+    return;
+  }
+  if (gameId === "durak") {
+    pendingDurakOptions = normalizeDurakOptions({
+      ...DEFAULT_DURAK_OPTIONS,
+      playerCount: Math.max(DEFAULT_DURAK_OPTIONS.playerCount, minDurakPlayers()),
+    });
+    mode = "room";
+    setupGameShell();
+    setupRoomLabels();
+    openOverlay(elements.gameDialog, "game");
+    renderDurakSetup();
     return;
   }
   const previous = client.getGameState(activeGameId);
@@ -1234,6 +1280,82 @@ function renderReversi(game, playerCount, myColor) {
   else elements.gameStatus.textContent = "Opponent's turn";
 }
 
+function renderDurakSetup() {
+  const minPlayers = minDurakPlayers();
+  const options = normalizeDurakOptions({
+    ...pendingDurakOptions,
+    playerCount: Math.max(pendingDurakOptions?.playerCount ?? DEFAULT_DURAK_OPTIONS.playerCount, minPlayers),
+  });
+  pendingDurakOptions = options;
+  elements.scoreboard.hidden = true;
+  elements.board.replaceChildren();
+
+  const panel = document.createElement("form");
+  panel.className = "durak-setup";
+  panel.innerHTML = `
+    <div class="durak-setup-title">
+      <strong>Durak table</strong>
+      <span>${mode === "room" ? `${minPlayers} humans in room` : "Solo table"}</span>
+    </div>
+    <label>
+      Players
+      <input name="playerCount" type="range" min="${minPlayers}" max="${DURAK_PLAYER_RANGE.MAX}" value="${options.playerCount}" />
+      <output>${options.playerCount}</output>
+    </label>
+    <label class="durak-check">
+      <input name="throwIn" type="checkbox" ${options.throwIn ? "checked" : ""} />
+      <span>Podkidnoy: after the attacker stops, other players may throw in</span>
+    </label>
+    <label>
+      Tournament target
+      <select name="matchTarget">
+        ${[1, 2, 3, 5, 7].map((target) => `<option value="${target}" ${target === options.matchTarget ? "selected" : ""}>${target === 1 ? "One game" : `${target} wins`}</option>`).join("")}
+      </select>
+    </label>
+    <button class="primary-button" type="submit">Start table</button>
+  `;
+
+  const range = panel.elements.playerCount;
+  const output = panel.querySelector("output");
+  range.addEventListener("input", () => { output.textContent = range.value; });
+  panel.addEventListener("submit", (event) => {
+    event.preventDefault();
+    pendingDurakOptions = normalizeDurakOptions({
+      playerCount: Math.max(Number(panel.elements.playerCount.value), minPlayers),
+      throwIn: panel.elements.throwIn.checked,
+      matchTarget: Number(panel.elements.matchTarget.value),
+    });
+    startConfiguredDurakGame();
+  });
+
+  elements.board.append(panel);
+  elements.gameStatus.textContent = mode === "room" && !client?.isHost
+    ? "Waiting for host to start the table..."
+    : "Choose table settings";
+}
+
+function startConfiguredDurakGame() {
+  if (mode === "solo") {
+    localGame = createGameForActive(null);
+    lastRevision = -1;
+    elements.newRound.hidden = false;
+    renderGame(localGame, localGame.options.playerCount, 0);
+    queueComputerMove();
+    return;
+  }
+  if (!client?.isHost) return;
+  const previous = client.getGameState(activeGameId);
+  lastRevision = -1;
+  client.setGameState(activeGameId, createGameForActive(previous));
+  const revision = (client.getRoomState()?.revision ?? 0) + 1;
+  client.setRoomState({
+    screen: "game",
+    activeGame: activeGameId,
+    startedAt: Date.now(),
+    revision,
+  });
+}
+
 function renderDurak(game, mySeat) {
   elements.board.replaceChildren();
   const table = document.createElement("div");
@@ -1245,6 +1367,8 @@ function renderDurak(game, mySeat) {
     <span>Trump: <strong>${cardText(game.trump)}</strong></span>
     <span>Deck: <strong>${game.deck.length}</strong></span>
     <span>Discard: <strong>${game.discard.length}</strong></span>
+    <span>${game.options.throwIn ? "Podkidnoy" : "Classic"}</span>
+    <span>Target: <strong>${game.options.matchTarget}</strong></span>
   `;
   table.append(header);
 
@@ -1260,9 +1384,10 @@ function renderDurak(game, mySeat) {
       : index === 0 && mode === "solo"
         ? `${playerProfile.avatar} ${playerProfile.name}`
         : `Bot ${index + 1}`;
-    seat.innerHTML = `<strong>${label}</strong><span>${player.hand.length} cards</span>`;
+    seat.innerHTML = `<strong>${label}</strong><span>${player.hand.length} cards · ${game.scores?.[index] ?? 0} pts</span>`;
     if (index === game.attacker) seat.insertAdjacentHTML("beforeend", "<small>Attacker</small>");
     if (index === game.defender) seat.insertAdjacentHTML("beforeend", "<small>Defender</small>");
+    if (game.passedThrowers?.includes(index)) seat.insertAdjacentHTML("beforeend", "<small>Pass</small>");
     players.append(seat);
   });
   table.append(players);
@@ -1316,8 +1441,15 @@ function renderDurak(game, mySeat) {
 
   elements.board.append(table);
   if (game.winner === "draw") elements.gameStatus.textContent = "Draw.";
+  else if (game.matchWinner !== null) elements.gameStatus.textContent = `Seat ${game.matchWinner + 1} wins the tournament.`;
   else if (game.winner !== null) elements.gameStatus.textContent = game.winner === mySeat ? "You are the durak." : `Seat ${game.winner + 1} is the durak.`;
-  else if (game.turn === mySeat) elements.gameStatus.textContent = mySeat === game.attacker ? "Your attack" : "Your defense";
+  else if (game.turn === mySeat) {
+    elements.gameStatus.textContent = mySeat === game.defender
+      ? "Your defense"
+      : mySeat === game.attacker
+        ? "Your attack"
+        : "Your throw-in";
+  }
   else elements.gameStatus.textContent = `Seat ${game.turn + 1} is thinking...`;
 }
 
