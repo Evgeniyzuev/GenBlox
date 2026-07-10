@@ -14,6 +14,32 @@ import {
   isCheckersState,
   playCheckersMove,
 } from "./games/checkers.js";
+import {
+  FIVE_MARKS,
+  chooseFiveInRowMove,
+  createFiveInRowGame,
+  isFiveInRowState,
+  playFiveInRowMove,
+} from "./games/five-in-row.js";
+import {
+  REVERSI_COLORS,
+  chooseReversiMove,
+  countReversi,
+  createReversiGame,
+  getReversiMoves,
+  isReversiState,
+  playReversiMove,
+} from "./games/reversi.js";
+import {
+  cardText,
+  chooseDurakBotAction,
+  createDurakGame,
+  getDurakActions,
+  isDurakState,
+  passDurak,
+  playDurakCard,
+  takeDurak,
+} from "./games/durak.js";
 import { WormsGame } from "./games/worms.js";
 import { MicroMachinesGame } from "./games/micromachines.js";
 import { WaveRunnersGame } from "./games/wave-runners.js";
@@ -90,6 +116,46 @@ const GAMES = {
         <li>Use W/A/S/D or arrows to move. Space, W, or Up jumps.</li>
         <li>Hold E beside a trophy on the surface to harvest it. Moving, jumping, or dropping into a trench cancels progress.</li>
         <li>Green waves are slow, yellow waves are faster, and red waves are the most dangerous. Trenches keep you safe.</li>
+      </ul>`,
+  },
+  "five-in-row": {
+    title: "Five in a Row",
+    kicker: "SPACE 006",
+    help: `
+      <h3>Goal</h3>
+      <p>Place five stones in one continuous horizontal, vertical, or diagonal line on a 15 x 15 board.</p>
+      <h3>How It Plays</h3>
+      <ul>
+        <li>Black moves first, then players alternate turns.</li>
+        <li>Only empty intersections can be claimed.</li>
+        <li>The first player to connect five wins the round.</li>
+      </ul>`,
+  },
+  reversi: {
+    title: "Reversi",
+    kicker: "SPACE 007",
+    help: `
+      <h3>Goal</h3>
+      <p>Finish the game with more discs than your opponent.</p>
+      <h3>How It Plays</h3>
+      <ul>
+        <li>Every move must trap at least one opposing disc between the new disc and one of your discs.</li>
+        <li>Trapped discs flip to your color in all eight directions.</li>
+        <li>If a player has no legal move, the turn automatically stays with the opponent.</li>
+      </ul>`,
+  },
+  durak: {
+    title: "Durak",
+    kicker: "SPACE 008 - 4 PLAYERS",
+    help: `
+      <h3>Goal</h3>
+      <p>Get rid of all your cards. The last player holding cards is the durak.</p>
+      <h3>How It Plays</h3>
+      <ul>
+        <li>The game uses a 36-card deck from sixes through aces.</li>
+        <li>The attacker plays a card, and the defender must beat it with a higher card of the same suit or a trump.</li>
+        <li>After a successful defense, press Bito. If the defender cannot beat the attack, press Take.</li>
+        <li>Room games support up to four human players; empty seats are filled by bots.</li>
       </ul>`,
   },
 };
@@ -187,6 +253,18 @@ let waveGame = null;
 let playerProfile = loadPlayerProfile();
 let lastPublishedProfile = "";
 
+function normalizeGameId(gameId) {
+  const aliases = {
+    five: "five-in-row",
+    gomoku: "five-in-row",
+    "five-in-a-row": "five-in-row",
+    "5-in-row": "five-in-row",
+    othello: "reversi",
+    fool: "durak",
+  };
+  return aliases[gameId] ?? gameId;
+}
+
 function cleanPlayerName(name) {
   const text = String(name ?? "").trim().replace(/\s+/g, " ");
   return text.slice(0, 18) || DEFAULT_PROFILE.name;
@@ -274,12 +352,20 @@ function showRealtimeUnavailable(stage, title, message) {
 function buildBoard(gameId) {
   elements.board.replaceChildren();
   elements.board.classList.toggle("is-checkers", gameId === "checkers");
-  const size = gameId === "checkers" ? 64 : 9;
+  elements.board.classList.toggle("is-five", gameId === "five-in-row");
+  elements.board.classList.toggle("is-reversi", gameId === "reversi");
+  elements.board.classList.toggle("is-durak", gameId === "durak");
+  if (gameId === "durak") return;
+  const size = gameId === "checkers" || gameId === "reversi" ? 64 : gameId === "five-in-row" ? 225 : 9;
   for (let index = 0; index < size; index += 1) {
     const cell = document.createElement("button");
     cell.className = gameId === "checkers"
       ? `checkers-cell${(Math.floor(index / 8) + index % 8) % 2 ? " is-dark" : ""}`
-      : "cell";
+      : gameId === "reversi"
+        ? "reversi-cell"
+        : gameId === "five-in-row"
+          ? "five-cell"
+          : "cell";
     cell.type = "button";
     cell.dataset.index = index;
     cell.setAttribute("role", "gridcell");
@@ -434,9 +520,16 @@ function syncRoom() {
   if (!client?.started) return;
   renderParty();
   const room = client.getRoomState();
+  if (room?.activeGame) room.activeGame = normalizeGameId(room.activeGame);
 
   if (room?.screen === "game" && GAMES[room.activeGame]) {
-    const expectedCells = room.activeGame === "checkers" ? 64 : 9;
+    const expectedCells = room.activeGame === "checkers" || room.activeGame === "reversi"
+      ? 64
+      : room.activeGame === "five-in-row"
+        ? 225
+        : room.activeGame === "durak"
+          ? 1
+          : 9;
     const gameChanged = configuredGameId !== room.activeGame || (!isRealtimeGame(room.activeGame) && elements.board.children.length !== expectedCells);
     activeGameId = room.activeGame;
     mode = "room";
@@ -520,7 +613,10 @@ function syncRoom() {
       waveGame.applyNetworkSnapshot(game);
       return;
     }
-    if (isValidGameState(game)) renderGame(game, client.playerCount, roomPlayerSide());
+    if (isValidGameState(game)) {
+      renderGame(game, client.playerCount, roomPlayerSide());
+      queueComputerMove();
+    }
   } else if (elements.gameDialog.open && mode === "room") {
     closeGameFromSync();
   }
@@ -542,6 +638,16 @@ function setupRoomLabels() {
     elements.nameO.textContent = "Bots fill empty slots";
     elements.newRound.hidden = true;
     elements.hint.textContent = "The race uses up to four human players. Empty slots become bots.";
+    return;
+  }
+  if (activeGameId === "durak") {
+    const side = roomPlayerSide();
+    elements.role.textContent = side === null ? "Spectating" : `Seat ${side + 1}`;
+    elements.players.textContent = `Players: ${Math.min(client.playerCount, 4)} / 4`;
+    elements.nameX.textContent = profileForPlayer(playerByIndex(0), "Room Host");
+    elements.nameO.textContent = "Card table";
+    elements.newRound.hidden = !client.isHost;
+    elements.hint.textContent = "Durak uses four seats. Empty seats are controlled by bots.";
     return;
   }
   const side = roomPlayerSide();
@@ -566,6 +672,11 @@ function setupRoomLabels() {
 
 function setupGameShell() {
   const game = GAMES[activeGameId];
+  if (!game) {
+    console.error(`Unknown game id: ${activeGameId}`);
+    activeGameId = "tic-tac-toe";
+    return setupGameShell();
+  }
   configuredGameId = activeGameId;
   elements.gameKicker.textContent = game.kicker;
   elements.gameTitle.textContent = game.title;
@@ -582,6 +693,7 @@ function setupGameShell() {
   elements.gameDialog.classList.toggle("is-micro", isMicro);
   elements.gameDialog.classList.toggle("is-wave", isWave);
   elements.board.setAttribute("aria-label", `${game.title} board`);
+  elements.scoreboard.hidden = activeGameId === "durak";
   elements.markX.textContent = activeGameId === "checkers" ? "●" : "×";
   elements.markO.textContent = activeGameId === "checkers" ? "○" : "○";
   if (!isRealtimeGame(activeGameId)) {
@@ -611,21 +723,34 @@ function roomPlayerSide() {
     if (client.playerIndex > 1) return null;
     return client.isHost ? CHECKER_COLORS.BLACK : CHECKER_COLORS.WHITE;
   }
+  if (activeGameId === "reversi") {
+    if (client.playerIndex > 1) return null;
+    return client.isHost ? REVERSI_COLORS.BLACK : REVERSI_COLORS.WHITE;
+  }
+  if (activeGameId === "durak") {
+    return client.playerIndex >= 0 && client.playerIndex < 4 ? client.playerIndex : null;
+  }
   return client.mark;
 }
 
 function isValidGameState(game) {
-  return activeGameId === "checkers" ? isCheckersState(game) : isGameState(game);
+  if (activeGameId === "checkers") return isCheckersState(game);
+  if (activeGameId === "five-in-row") return isFiveInRowState(game);
+  if (activeGameId === "reversi") return isReversiState(game);
+  if (activeGameId === "durak") return isDurakState(game);
+  return isGameState(game);
 }
 
 function createGameForActive(previous = null) {
-  return activeGameId === "checkers"
-    ? createCheckersGame(isCheckersState(previous) ? previous : null)
-    : createGame(isGameState(previous) ? previous : null);
+  if (activeGameId === "checkers") return createCheckersGame(isCheckersState(previous) ? previous : null);
+  if (activeGameId === "five-in-row") return createFiveInRowGame(isFiveInRowState(previous) ? previous : null);
+  if (activeGameId === "reversi") return createReversiGame(isReversiState(previous) ? previous : null);
+  if (activeGameId === "durak") return createDurakGame(isDurakState(previous) ? previous : null);
+  return createGame(isGameState(previous) ? previous : null);
 }
 
 function openSoloGame(gameId) {
-  activeGameId = gameId;
+  activeGameId = normalizeGameId(gameId);
   mode = "solo";
   if (activeGameId === "worms") {
     setupGameShell();
@@ -668,9 +793,19 @@ function openSoloGame(gameId) {
   }
   localGame = createGameForActive(null);
   setupGameShell();
-  const humanSide = activeGameId === "checkers" ? CHECKER_COLORS.BLACK : "X";
-  elements.role.textContent = activeGameId === "checkers" ? "You play black" : "You play ×";
-  elements.players.textContent = "Solo game";
+  const humanSide = activeGameId === "checkers"
+    ? CHECKER_COLORS.BLACK
+    : activeGameId === "reversi"
+      ? REVERSI_COLORS.BLACK
+      : activeGameId === "durak"
+        ? 0
+        : "X";
+  elements.role.textContent = activeGameId === "durak"
+    ? "Seat 1"
+    : activeGameId === "checkers" || activeGameId === "reversi"
+      ? "You play black"
+      : "You play X";
+  elements.players.textContent = activeGameId === "durak" ? "Solo with 3 bots" : "Solo game";
   elements.nameX.textContent = `${playerProfile.avatar} ${playerProfile.name}`;
   elements.nameO.textContent = "Computer";
   elements.newRound.hidden = false;
@@ -682,6 +817,7 @@ function openSoloGame(gameId) {
 }
 
 function launchForRoom(gameId) {
+  gameId = normalizeGameId(gameId);
   activeGameId = gameId;
   if (gameId === "worms") {
     client.setGameState("worms", {
@@ -763,6 +899,14 @@ function makeMove(index) {
     makeCheckersMove(index);
     return;
   }
+  if (activeGameId === "five-in-row") {
+    makeFiveInRowMove(index);
+    return;
+  }
+  if (activeGameId === "reversi") {
+    makeReversiMove(index);
+    return;
+  }
 
   if (mode === "solo") {
     const next = playMove(localGame, index, "X");
@@ -814,16 +958,109 @@ function makeCheckersMove(index) {
   renderGame(game, mode === "solo" ? 2 : client.playerCount, side);
 }
 
+function makeFiveInRowMove(index) {
+  if (mode === "solo") {
+    const next = playFiveInRowMove(localGame, index, FIVE_MARKS.BLACK);
+    if (next === localGame) return;
+    localGame = next;
+    renderGame(localGame, 2, FIVE_MARKS.BLACK);
+    queueComputerMove();
+    return;
+  }
+
+  const current = client?.getGameState(activeGameId);
+  if (!isFiveInRowState(current) || client.playerCount < 2) return;
+  const next = playFiveInRowMove(current, index, client.mark);
+  if (next !== current) client.setGameState(activeGameId, next);
+}
+
+function makeReversiMove(index) {
+  const side = mode === "solo" ? REVERSI_COLORS.BLACK : roomPlayerSide();
+  const game = mode === "solo" ? localGame : client?.getGameState(activeGameId);
+  if (!isReversiState(game) || game.turn !== side || (mode === "room" && client.playerCount < 2)) return;
+  const next = playReversiMove(game, index, side);
+  if (next === game) return;
+  if (mode === "solo") {
+    localGame = next;
+    renderGame(localGame, 2, side);
+    queueComputerMove();
+  } else {
+    client.setGameState(activeGameId, next);
+  }
+}
+
+function playDurakAction(action, cardId = null) {
+  const game = mode === "solo" ? localGame : client?.getGameState(activeGameId);
+  const side = mode === "solo" ? 0 : roomPlayerSide();
+  if (!isDurakState(game) || side === null) return;
+  let next = game;
+  if (action === "card") next = playDurakCard(game, cardId, side);
+  if (action === "pass") next = passDurak(game, side);
+  if (action === "take") next = takeDurak(game, side);
+  if (next === game) return;
+  if (mode === "solo") {
+    localGame = next;
+    renderGame(localGame, 4, side);
+    queueComputerMove();
+  } else {
+    client.setGameState(activeGameId, next);
+  }
+}
+
 function queueComputerMove() {
+  const game = mode === "room" ? client?.getGameState(activeGameId) : localGame;
+
+  if (activeGameId === "durak") {
+    if (!isDurakState(game) || game.winner !== null) return;
+    const humanSeats = mode === "room" ? Math.min(client?.playerCount ?? 1, 4) : 1;
+    const botTurn = game.turn >= humanSeats;
+    if (!botTurn || (mode === "room" && !client?.isHost)) return;
+    if (computerTimer) return;
+    elements.gameStatus.textContent = "Bot is thinking...";
+    computerTimer = setTimeout(() => {
+      computerTimer = null;
+      const current = mode === "room" ? client?.getGameState(activeGameId) : localGame;
+      if (!isDurakState(current)) return;
+      const action = chooseDurakBotAction(current, current.turn);
+      if (!action) return;
+      let next = current;
+      if (action.type === "card") next = playDurakCard(current, action.cardId, current.turn);
+      if (action.type === "pass") next = passDurak(current, current.turn);
+      if (action.type === "take") next = takeDurak(current, current.turn);
+      if (next === current) return;
+      if (mode === "room") client.setGameState(activeGameId, next);
+      else {
+        localGame = next;
+        renderGame(localGame, 4, 0);
+        queueComputerMove();
+      }
+    }, 500);
+    return;
+  }
+
   clearTimeout(computerTimer);
-  const computerSide = activeGameId === "checkers" ? CHECKER_COLORS.WHITE : "O";
-  if (localGame.winner || localGame.turn !== computerSide) return;
+  if (mode !== "solo" || !game) return;
+  const computerSide = activeGameId === "checkers"
+    ? CHECKER_COLORS.WHITE
+    : activeGameId === "reversi"
+      ? REVERSI_COLORS.WHITE
+      : "O";
+  if (game.winner || game.turn !== computerSide) return;
   elements.gameStatus.textContent = "Computer is thinking...";
   computerTimer = setTimeout(() => {
     if (activeGameId === "checkers") {
       const move = chooseCheckersMove(localGame, computerSide);
       if (move) localGame = playCheckersMove(localGame, move.from, move.to, computerSide);
       renderGame(localGame, 2, CHECKER_COLORS.BLACK);
+      if (localGame.turn === computerSide && !localGame.winner) queueComputerMove();
+    } else if (activeGameId === "five-in-row") {
+      const index = chooseFiveInRowMove(localGame, computerSide);
+      if (index >= 0) localGame = playFiveInRowMove(localGame, index, computerSide);
+      renderGame(localGame, 2, FIVE_MARKS.BLACK);
+    } else if (activeGameId === "reversi") {
+      const index = chooseReversiMove(localGame, computerSide);
+      if (index >= 0) localGame = playReversiMove(localGame, index, computerSide);
+      renderGame(localGame, 2, REVERSI_COLORS.BLACK);
       if (localGame.turn === computerSide && !localGame.winner) queueComputerMove();
     } else {
       const index = chooseComputerMove(localGame);
@@ -842,6 +1079,18 @@ function renderGame(game, playerCount, myMark) {
     renderCheckers(game, playerCount, myMark);
     return;
   }
+  if (activeGameId === "five-in-row") {
+    renderFiveInRow(game, playerCount, myMark);
+    return;
+  }
+  if (activeGameId === "reversi") {
+    renderReversi(game, playerCount, myMark);
+    return;
+  }
+  if (activeGameId === "durak") {
+    renderDurak(game, myMark);
+    return;
+  }
 
   [...elements.board.children].forEach((cell, index) => {
     const mark = game.board[index];
@@ -857,6 +1106,142 @@ function renderGame(game, playerCount, myMark) {
   else if (game.winner === "draw") elements.gameStatus.textContent = "Draw!";
   else if (game.winner) elements.gameStatus.textContent = game.winner === myMark ? "You won!" : "Opponent won";
   else elements.gameStatus.textContent = game.turn === myMark ? "Your turn" : "Opponent's turn";
+}
+
+function renderFiveInRow(game, playerCount, myMark) {
+  [...elements.board.children].forEach((cell, index) => {
+    const mark = game.board[index];
+    cell.replaceChildren();
+    if (mark) {
+      const stone = document.createElement("span");
+      stone.className = `five-stone ${mark === FIVE_MARKS.BLACK ? "black" : "white"}`;
+      cell.append(stone);
+    }
+    cell.className = `five-cell${game.winningLine.includes(index) ? " is-win" : ""}`;
+    cell.disabled = Boolean(mark || game.winner || playerCount < 2 || game.turn !== myMark);
+  });
+
+  elements.scoreX.textContent = game.scores.X;
+  elements.scoreO.textContent = game.scores.O;
+  elements.cards.forEach((card) => card.classList.toggle("is-turn", !game.winner && card.dataset.player === game.turn));
+
+  if (playerCount < 2) elements.gameStatus.textContent = "Waiting for the second player...";
+  else if (game.winner === "draw") elements.gameStatus.textContent = "Draw!";
+  else if (game.winner) elements.gameStatus.textContent = game.winner === myMark ? "You won!" : "Opponent won";
+  else elements.gameStatus.textContent = game.turn === myMark ? "Your turn" : "Opponent's turn";
+}
+
+function renderReversi(game, playerCount, myColor) {
+  const legalMoves = getReversiMoves(game, myColor).map((move) => move.index);
+  [...elements.board.children].forEach((cell, index) => {
+    const color = game.board[index];
+    cell.replaceChildren();
+    cell.className = `reversi-cell${legalMoves.includes(index) ? " is-target" : ""}`;
+    if (color) {
+      const disc = document.createElement("span");
+      disc.className = `reversi-disc ${color === REVERSI_COLORS.BLACK ? "black" : "white"}`;
+      cell.append(disc);
+    }
+    cell.disabled = Boolean(color || game.winner || playerCount < 2 || game.turn !== myColor || !legalMoves.includes(index));
+  });
+
+  elements.scoreX.textContent = countReversi(game.board, REVERSI_COLORS.BLACK);
+  elements.scoreO.textContent = countReversi(game.board, REVERSI_COLORS.WHITE);
+  elements.cards.forEach((card) => {
+    const color = card.dataset.player === "X" ? REVERSI_COLORS.BLACK : REVERSI_COLORS.WHITE;
+    card.classList.toggle("is-turn", !game.winner && color === game.turn);
+  });
+
+  if (playerCount < 2) elements.gameStatus.textContent = "Waiting for the second player...";
+  else if (game.winner === "draw") elements.gameStatus.textContent = "Draw!";
+  else if (game.winner) elements.gameStatus.textContent = game.winner === myColor ? "You won!" : "Opponent won";
+  else if (game.turn === myColor) elements.gameStatus.textContent = legalMoves.length ? "Your turn" : "No legal moves";
+  else elements.gameStatus.textContent = "Opponent's turn";
+}
+
+function renderDurak(game, mySeat) {
+  elements.board.replaceChildren();
+  const table = document.createElement("div");
+  table.className = "durak-table";
+
+  const header = document.createElement("div");
+  header.className = "durak-header";
+  header.innerHTML = `
+    <span>Trump: <strong>${cardText(game.trump)}</strong></span>
+    <span>Deck: <strong>${game.deck.length}</strong></span>
+    <span>Discard: <strong>${game.discard.length}</strong></span>
+  `;
+  table.append(header);
+
+  const players = document.createElement("div");
+  players.className = "durak-players";
+  game.players.forEach((player, index) => {
+    const seat = document.createElement("div");
+    seat.className = `durak-player${index === mySeat ? " is-you" : ""}${index === game.turn ? " is-turn" : ""}`;
+    const label = mode === "room" && index < (client?.playerCount ?? 0)
+      ? profileForPlayer(playerByIndex(index), index === 0 ? "Room Host" : `Player ${index + 1}`)
+      : index === 0 && mode === "solo"
+        ? `${playerProfile.avatar} ${playerProfile.name}`
+        : `Bot ${index + 1}`;
+    seat.innerHTML = `<strong>${label}</strong><span>${player.hand.length} cards</span>`;
+    if (index === game.attacker) seat.insertAdjacentHTML("beforeend", "<small>Attacker</small>");
+    if (index === game.defender) seat.insertAdjacentHTML("beforeend", "<small>Defender</small>");
+    players.append(seat);
+  });
+  table.append(players);
+
+  const pairs = document.createElement("div");
+  pairs.className = "durak-pairs";
+  if (!game.table.length) {
+    pairs.innerHTML = `<span class="durak-empty">Table is clear</span>`;
+  } else {
+    game.table.forEach((pair) => {
+      const slot = document.createElement("div");
+      slot.className = "durak-pair";
+      slot.innerHTML = `<span>${cardText(pair.attack)}</span><span>${pair.defense ? cardText(pair.defense) : "..."}</span>`;
+      pairs.append(slot);
+    });
+  }
+  table.append(pairs);
+
+  const hand = document.createElement("div");
+  hand.className = "durak-hand";
+  const actions = getDurakActions(game, mySeat);
+  const legalIds = new Set(actions.cards.map((card) => card.id));
+  const cards = mySeat === null ? [] : game.players[mySeat]?.hand ?? [];
+  cards.forEach((card) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `durak-card ${card.suit === game.trump.suit ? "is-trump" : ""}`;
+    button.textContent = cardText(card);
+    button.disabled = !legalIds.has(card.id);
+    button.addEventListener("click", () => playDurakAction("card", card.id));
+    hand.append(button);
+  });
+  table.append(hand);
+
+  const actionBar = document.createElement("div");
+  actionBar.className = "durak-actions";
+  const pass = document.createElement("button");
+  pass.className = "secondary-button";
+  pass.type = "button";
+  pass.textContent = "Bito";
+  pass.disabled = !actions.canPass;
+  pass.addEventListener("click", () => playDurakAction("pass"));
+  const take = document.createElement("button");
+  take.className = "secondary-button";
+  take.type = "button";
+  take.textContent = "Take";
+  take.disabled = !actions.canTake;
+  take.addEventListener("click", () => playDurakAction("take"));
+  actionBar.append(pass, take);
+  table.append(actionBar);
+
+  elements.board.append(table);
+  if (game.winner === "draw") elements.gameStatus.textContent = "Draw.";
+  else if (game.winner !== null) elements.gameStatus.textContent = game.winner === mySeat ? "You are the durak." : `Seat ${game.winner + 1} is the durak.`;
+  else if (game.turn === mySeat) elements.gameStatus.textContent = mySeat === game.attacker ? "Your attack" : "Your defense";
+  else elements.gameStatus.textContent = `Seat ${game.turn + 1} is thinking...`;
 }
 
 function renderCheckers(game, playerCount, mySide) {
@@ -913,7 +1298,13 @@ function startNewRound() {
     localGame = createGameForActive(localGame);
     selectedChecker = null;
     lastRevision = -1;
-    renderGame(localGame, 2, activeGameId === "checkers" ? CHECKER_COLORS.BLACK : "X");
+    renderGame(localGame, activeGameId === "durak" ? 4 : 2, activeGameId === "checkers"
+      ? CHECKER_COLORS.BLACK
+      : activeGameId === "reversi"
+        ? REVERSI_COLORS.BLACK
+        : activeGameId === "durak"
+          ? 0
+          : "X");
     queueComputerMove();
     return;
   }
