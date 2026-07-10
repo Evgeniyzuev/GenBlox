@@ -269,6 +269,10 @@ function normalizeGameId(gameId) {
   return aliases[gameId] ?? gameId;
 }
 
+function isRoomLikeMode() {
+  return mode === "room" || mode === "room-setup";
+}
+
 function cleanPlayerName(name) {
   const text = String(name ?? "").trim().replace(/\s+/g, " ");
   return text.slice(0, 18) || DEFAULT_PROFILE.name;
@@ -337,7 +341,7 @@ function seatLimitForGame(gameId = activeGameId) {
 }
 
 function minDurakPlayers() {
-  return mode === "room" ? Math.min(Math.max(client?.playerCount ?? 1, DURAK_PLAYER_RANGE.MIN), DURAK_PLAYER_RANGE.MAX) : DURAK_PLAYER_RANGE.MIN;
+  return isRoomLikeMode() ? Math.min(Math.max(client?.playerCount ?? 1, DURAK_PLAYER_RANGE.MIN), DURAK_PLAYER_RANGE.MAX) : DURAK_PLAYER_RANGE.MIN;
 }
 
 function createRoomSeats(limit = seatLimitForGame()) {
@@ -356,7 +360,7 @@ function createRoomSeats(limit = seatLimitForGame()) {
 }
 
 function roomGameSeats(game = null, gameId = activeGameId) {
-  const state = game ?? (mode === "room" ? client?.getGameState(gameId) : null);
+  const state = game ?? (isRoomLikeMode() ? client?.getGameState(gameId) : null);
   return Array.isArray(state?.seats) ? state.seats : [];
 }
 
@@ -368,11 +372,11 @@ function roomSeatForLocalPlayer(game = null, gameId = activeGameId) {
 }
 
 function roomHumanSeatCount(game = null, gameId = activeGameId) {
-  return mode === "room" ? roomGameSeats(game, gameId).length : 1;
+  return isRoomLikeMode() ? roomGameSeats(game, gameId).length : 1;
 }
 
 function attachRoomSeats(game, previous = null, gameId = activeGameId) {
-  if (mode !== "room" || isRealtimeGame(gameId)) return game;
+  if (!isRoomLikeMode() || isRealtimeGame(gameId)) return game;
   const seats = Array.isArray(previous?.seats) && previous.seats.length
     ? previous.seats
     : createRoomSeats(seatLimitForGame(gameId));
@@ -596,7 +600,7 @@ function syncRoom() {
     const game = client.getGameState(activeGameId);
     const needsSeatMigration = !isRealtimeGame(activeGameId) && isValidGameState(game) && !roomGameSeats(game).length;
     const needsDurakMigration = activeGameId === "durak" && isDurakState(game)
-      && (!game.options || !Array.isArray(game.scores) || !Array.isArray(game.passedThrowers));
+      && (!game.options || !Array.isArray(game.scores) || !Array.isArray(game.passedThrowers) || !Object.hasOwn(game, "defenderHandAtStart"));
     if (needsSeatMigration || needsDurakMigration) {
       if (client.isHost) {
         const options = activeGameId === "durak" ? normalizeDurakOptions(game.options) : null;
@@ -605,6 +609,7 @@ function syncRoom() {
           ...(options ? { options } : {}),
           ...(activeGameId === "durak" && !Array.isArray(game.scores) ? { scores: Array(game.players.length).fill(0) } : {}),
           ...(activeGameId === "durak" && !Array.isArray(game.passedThrowers) ? { passedThrowers: [] } : {}),
+          ...(activeGameId === "durak" && !Object.hasOwn(game, "defenderHandAtStart") ? { defenderHandAtStart: null } : {}),
           seats: roomGameSeats(game).length ? roomGameSeats(game) : createRoomSeats(seatLimitForGame(activeGameId)),
           revision: game.revision + 1,
         });
@@ -993,7 +998,7 @@ function launchForRoom(gameId) {
       ...DEFAULT_DURAK_OPTIONS,
       playerCount: Math.max(DEFAULT_DURAK_OPTIONS.playerCount, minDurakPlayers()),
     });
-    mode = "room";
+    mode = "room-setup";
     setupGameShell();
     setupRoomLabels();
     openOverlay(elements.gameDialog, "game");
@@ -1295,7 +1300,7 @@ function renderDurakSetup() {
   panel.innerHTML = `
     <div class="durak-setup-title">
       <strong>Durak table</strong>
-      <span>${mode === "room" ? `${minPlayers} humans in room` : "Solo table"}</span>
+      <span>${isRoomLikeMode() ? `${minPlayers} humans in room` : "Solo table"}</span>
     </div>
     <label>
       Players
@@ -1329,7 +1334,7 @@ function renderDurakSetup() {
   });
 
   elements.board.append(panel);
-  elements.gameStatus.textContent = mode === "room" && !client?.isHost
+  elements.gameStatus.textContent = isRoomLikeMode() && !client?.isHost
     ? "Waiting for host to start the table..."
     : "Choose table settings";
 }
@@ -1343,9 +1348,9 @@ function startConfiguredDurakGame() {
     queueComputerMove();
     return;
   }
-  if (!client?.isHost) return;
   const previous = client.getGameState(activeGameId);
   lastRevision = -1;
+  mode = "room";
   client.setGameState(activeGameId, createGameForActive(previous));
   const revision = (client.getRoomState()?.revision ?? 0) + 1;
   client.setRoomState({
@@ -1499,6 +1504,7 @@ function requestCloseGame() {
   } else {
     destroyRealtimeGames();
     closeOverlay(elements.gameDialog, "game");
+    if (mode === "room-setup") mode = "room";
   }
 }
 
@@ -1571,6 +1577,7 @@ function handlePopState() {
     }
     suppressGameReturn = false;
     if (mode === "solo") mode = "catalog";
+    if (mode === "room-setup") mode = "room";
     return;
   }
   if (elements.roomDialog.open) elements.roomDialog.close();
