@@ -23,8 +23,13 @@ const MAX_GREEN_SURFACE_RUN = 68;
 const GREEN_SAFETY_MARGIN = 1.2;
 const BASE_COLLECT_RATE = 76;
 const COLLECT_RADIUS = 2.175;
+const TROPHY_MIN_SPACING = 2.35;
+const RUNNER_BUMP_RADIUS = 3.0;
+const RUNNER_BUMP_COOLDOWN = 1.1;
 const SOUND_STORAGE_KEY = "genblox:wave-runners-muted";
-const MATCH_TARGETS = [20000, 50000, 100000];
+const INITIAL_SPEED_UPGRADE_COST = 90;
+const INITIAL_COLLECT_UPGRADE_COST = 70;
+const MATCH_TARGETS = [20000, 50000, 100000, 200000, 500000, 1000000];
 const MAX_ACTIVE_TROPHIES = 180;
 const TROPHY_RESPAWN_INTERVAL = 30;
 const WAVE_QUEUE_SECONDS = 30;
@@ -137,6 +142,9 @@ export class WaveRunnersGame {
       z: 5,
       angle: 0,
       speed: 0,
+      vy: 0,
+      grounded: true,
+      inTrench: false,
       targetX: 3.8,
       targetZ: 18,
       state: BOT_STATES.RUNNING,
@@ -146,8 +154,9 @@ export class WaveRunnersGame {
       targetTrench: null,
       speedLevel: 0,
       collectRateLevel: 0,
-      speedUpgradeCost: 90,
-      collectUpgradeCost: 70,
+      speedUpgradeCost: INITIAL_SPEED_UPGRADE_COST,
+      collectUpgradeCost: INITIAL_COLLECT_UPGRADE_COST,
+      bumpCooldown: 0,
       box: new THREE.Box3(),
     };
     this.network = callbacks.network ?? null;
@@ -160,12 +169,13 @@ export class WaveRunnersGame {
     this.money = 0;
     this.speedLevel = 0;
     this.collectRateLevel = 0;
-    this.speedUpgradeCost = 90;
-    this.collectUpgradeCost = 70;
+    this.speedUpgradeCost = INITIAL_SPEED_UPGRADE_COST;
+    this.collectUpgradeCost = INITIAL_COLLECT_UPGRADE_COST;
     this.wasActionPressed = false;
     this.collecting = null;
     this.deathFlash = 0;
     this.impactState = null;
+    this.impacts = [];
     this.victoryShown = false;
     this.victoryConfetti = [];
     this.muted = localStorage.getItem(SOUND_STORAGE_KEY) === "1";
@@ -213,6 +223,7 @@ export class WaveRunnersGame {
       state: PLAYER_STATES.RUNNING,
       grounded: true,
       inTrench: false,
+      bumpCooldown: 0,
       box: new THREE.Box3(),
     };
 
@@ -397,10 +408,10 @@ export class WaveRunnersGame {
     group.add(torso);
     makeMesh(box(new THREE.Vector3(0.98, 1.06, 0.48)), bodyMaterial, new THREE.Vector3(0, 0, 0), torso, "hoodie");
     makeMesh(box(new THREE.Vector3(1.08, 1.0, 0.12)), vestMaterial, new THREE.Vector3(0, 0.03, -0.31), torso, "vest-back");
-    makeMesh(box(new THREE.Vector3(0.25, 1.0, 0.16)), vestMaterial, new THREE.Vector3(-0.35, 0.03, -0.35), torso, "vest-left");
-    makeMesh(box(new THREE.Vector3(0.25, 1.0, 0.16)), vestMaterial, new THREE.Vector3(0.35, 0.03, -0.35), torso, "vest-right");
-    makeMesh(cylinder(0.06, 0.06, 0.52, 10), this.materials.trim, new THREE.Vector3(0, -0.6, -0.32), torso, "zipper").rotation.x = Math.PI / 2;
-    makeMesh(cylinder(0.08, 0.08, 0.08, 12), this.materials.face, new THREE.Vector3(0, -0.84, -0.31), torso, "zipper-pull");
+    makeMesh(box(new THREE.Vector3(0.25, 1.0, 0.16)), vestMaterial, new THREE.Vector3(-0.35, 0.03, 0.35), torso, "vest-left");
+    makeMesh(box(new THREE.Vector3(0.25, 1.0, 0.16)), vestMaterial, new THREE.Vector3(0.35, 0.03, 0.35), torso, "vest-right");
+    makeMesh(cylinder(0.06, 0.06, 0.52, 10), this.materials.trim, new THREE.Vector3(0, -0.6, 0.32), torso, "zipper").rotation.x = Math.PI / 2;
+    makeMesh(cylinder(0.08, 0.08, 0.08, 12), this.materials.face, new THREE.Vector3(0, -0.84, 0.31), torso, "zipper-pull");
 
     const neck = makeMesh(cylinder(0.18, 0.2, 0.18, 16), skinMaterial, new THREE.Vector3(0, 1.03, 0), group, "neck");
     neck.scale.z = 0.82;
@@ -409,16 +420,16 @@ export class WaveRunnersGame {
     head.position.set(0, 1.36, 0);
     group.add(head);
     makeMesh(box(new THREE.Vector3(0.72, 0.7, 0.66)), skinMaterial, new THREE.Vector3(0, 0, 0), head, "head-block");
-    makeMesh(sphere(0.08, 12, 8), this.materials.face, new THREE.Vector3(-0.18, 0.06, -0.36), head, "eye-left").scale.y = 1.45;
-    makeMesh(sphere(0.08, 12, 8), this.materials.face, new THREE.Vector3(0.18, 0.06, -0.36), head, "eye-right").scale.y = 1.45;
-    makeMesh(box(new THREE.Vector3(0.22, 0.035, 0.035)), this.materials.mouth, new THREE.Vector3(0, -0.18, -0.37), head, "mouth");
+    makeMesh(sphere(0.08, 12, 8), this.materials.face, new THREE.Vector3(-0.18, 0.06, 0.36), head, "eye-left").scale.y = 1.45;
+    makeMesh(sphere(0.08, 12, 8), this.materials.face, new THREE.Vector3(0.18, 0.06, 0.36), head, "eye-right").scale.y = 1.45;
+    makeMesh(box(new THREE.Vector3(0.22, 0.035, 0.035)), this.materials.mouth, new THREE.Vector3(0, -0.18, 0.37), head, "mouth");
 
     const hairCap = makeMesh(box(new THREE.Vector3(0.78, 0.22, 0.72)), hairMaterial, new THREE.Vector3(0, 0.42, 0.01), head, "hair-cap");
     hairCap.rotation.x = -0.08;
     [
-      [-0.25, 0.41, -0.28, -0.6, 0.2],
-      [-0.05, 0.48, -0.32, -0.28, 0.04],
-      [0.2, 0.4, -0.29, -0.8, -0.18],
+      [-0.25, 0.41, 0.28, 0.6, 0.2],
+      [-0.05, 0.48, 0.32, 0.28, 0.04],
+      [0.2, 0.4, 0.29, 0.8, -0.18],
       [0.39, 0.16, -0.05, -0.08, -0.55],
       [-0.43, 0.13, -0.04, 0.08, 0.5],
     ].forEach(([x, y, z, rx, rz], index) => {
@@ -434,7 +445,7 @@ export class WaveRunnersGame {
       makeMesh(sphere(0.18, 14, 8), bodyMaterial, new THREE.Vector3(0, 0.04, 0), arm, `${side < 0 ? "left" : "right"}-shoulder`).scale.set(1, 0.72, 0.9);
       makeMesh(box(new THREE.Vector3(0.3, 0.48, 0.3)), skinMaterial, new THREE.Vector3(0, -0.31, 0), arm, "upper-arm");
       makeMesh(box(new THREE.Vector3(0.32, 0.18, 0.32)), side < 0 ? gloveMaterial : bodyMaterial, new THREE.Vector3(0, -0.66, 0), arm, "wrist");
-      makeMesh(sphere(0.18, 14, 10), side < 0 ? gloveMaterial : skinMaterial, new THREE.Vector3(0, -0.86, -0.02), arm, "hand").scale.set(0.85, 1.05, 0.78);
+      makeMesh(sphere(0.18, 14, 10), side < 0 ? gloveMaterial : skinMaterial, new THREE.Vector3(0, -0.86, 0.02), arm, "hand").scale.set(0.85, 1.05, 0.78);
       return arm;
     };
 
@@ -443,9 +454,9 @@ export class WaveRunnersGame {
       leg.position.set(side * 0.26, -0.12, 0);
       group.add(leg);
       makeMesh(box(new THREE.Vector3(0.34, 0.82, 0.34)), pantsMaterial, new THREE.Vector3(0, -0.48, 0), leg, "pants");
-      makeMesh(box(new THREE.Vector3(0.42, 0.22, 0.42)), bootMaterial, new THREE.Vector3(0, -0.98, -0.02), leg, "boot-top");
-      makeMesh(box(new THREE.Vector3(0.46, 0.18, 0.66)), soleMaterial, new THREE.Vector3(0, -1.12, -0.12), leg, "boot-sole");
-      makeMesh(cylinder(0.05, 0.05, 0.12, 10), this.materials.trim, new THREE.Vector3(side * 0.08, -0.95, -0.36), leg, "lace").rotation.x = Math.PI / 2;
+      makeMesh(box(new THREE.Vector3(0.42, 0.22, 0.42)), bootMaterial, new THREE.Vector3(0, -0.98, 0.02), leg, "boot-top");
+      makeMesh(box(new THREE.Vector3(0.46, 0.18, 0.66)), soleMaterial, new THREE.Vector3(0, -1.12, 0.12), leg, "boot-sole");
+      makeMesh(cylinder(0.05, 0.05, 0.12, 10), this.materials.trim, new THREE.Vector3(side * 0.08, -0.95, 0.36), leg, "lace").rotation.x = Math.PI / 2;
       return leg;
     };
 
@@ -546,12 +557,24 @@ export class WaveRunnersGame {
     floor.position.set(0, 0.18, 0);
     floor.receiveShadow = true;
     house.add(floor);
-    [-1, 1].forEach((side) => {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(1.05, 9.6, 18.6), this.materials.house);
-      wall.position.set(side * 11.25, 4.8, 0);
-      wall.castShadow = true;
-      wall.receiveShadow = true;
-      house.add(wall);
+    [-1, 1].forEach((xSide) => {
+      [-1, 1].forEach((zSide) => {
+        const column = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 9.7, 12), this.materials.house);
+        column.position.set(xSide * 10.15, 5.05, zSide * 7.9);
+        column.castShadow = true;
+        column.receiveShadow = true;
+        house.add(column);
+        const base = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.45, 1.35), this.materials.house);
+        base.position.set(xSide * 10.15, 0.72, zSide * 7.9);
+        base.castShadow = true;
+        base.receiveShadow = true;
+        house.add(base);
+        const capital = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.55, 1.45), this.materials.house);
+        capital.position.set(xSide * 10.15, 9.68, zSide * 7.9);
+        capital.castShadow = true;
+        capital.receiveShadow = true;
+        house.add(capital);
+      });
     });
     const roof = new THREE.Mesh(new THREE.ConeGeometry(16.2, 6.3, 4), this.materials.roof);
     roof.position.set(0, 12.15, 0);
@@ -600,6 +623,7 @@ export class WaveRunnersGame {
     this.winner = null;
     this.victoryShown = false;
     this.impactState = null;
+    this.impacts = [];
     this.victoryOverlay.hidden = true;
     this.goalChoice.hidden = true;
     this.callbacks.onStatus?.(`${this.selectedMap.title}: first to $${targetScore.toLocaleString("en-US")} wins.`);
@@ -608,6 +632,12 @@ export class WaveRunnersGame {
 
   resetRunState() {
     this.money = 0;
+    this.speedLevel = 0;
+    this.collectRateLevel = 0;
+    this.speedUpgradeCost = INITIAL_SPEED_UPGRADE_COST;
+    this.collectUpgradeCost = INITIAL_COLLECT_UPGRADE_COST;
+    this.refreshMachineLabel("speed", `SPEED $${this.speedUpgradeCost}`, "#63dcff");
+    this.refreshMachineLabel("collect", `TAKE $${this.collectUpgradeCost}`, "#b7f34a");
     this.trophies = 0;
     this.lootValue = 0;
     this.totalScore = 0;
@@ -623,6 +653,8 @@ export class WaveRunnersGame {
     this.player.inTrench = false;
     this.playerGroup.rotation.x = 0;
     this.playerGroup.rotation.z = 0;
+    this.impactState = null;
+    this.impacts = [];
     this.collecting = null;
     this.claimedTrophyIds.clear();
     this.pendingClaimId = null;
@@ -631,11 +663,18 @@ export class WaveRunnersGame {
     if (this.bot) {
       this.bot.score = 0;
       this.bot.money = 0;
+      this.bot.speedLevel = 0;
+      this.bot.collectRateLevel = 0;
+      this.bot.speedUpgradeCost = INITIAL_SPEED_UPGRADE_COST;
+      this.bot.collectUpgradeCost = INITIAL_COLLECT_UPGRADE_COST;
       this.bot.x = 3.8;
       this.bot.y = 1.55;
       this.bot.z = 5;
       this.bot.angle = 0;
       this.bot.speed = 0;
+      this.bot.vy = 0;
+      this.bot.grounded = true;
+      this.bot.inTrench = false;
       this.bot.targetX = 3.8;
       this.bot.targetZ = 18;
       this.bot.targetTrophy = null;
@@ -930,7 +969,7 @@ export class WaveRunnersGame {
   }
 
   jump() {
-    if (!this.player.grounded || this.impactState) return;
+    if (!this.player.grounded || this.isRunnerImpacted(this.player)) return;
     this.player.vy = this.player.inTrench ? 13.8 : 9.4;
     this.player.grounded = false;
     this.player.state = PLAYER_STATES.JUMPING;
@@ -1079,15 +1118,14 @@ export class WaveRunnersGame {
     if (index > 1) {
       const baseTrophyCount = 2 + Math.floor(rng() * 4) + (rng() < 0.35 ? 2 : 0);
       const trophyCount = Math.max(2, Math.round(baseTrophyCount * 1.2));
-      const before = this.trophiesWorld.length;
       const rowZ = chunkStart + r(8, this.chunkLength - 8);
       for (let item = 0; item < trophyCount; item += 1) {
         const parallel = item < 5 && rng() < 0.72;
         this.spawnTrophy(index, trench, parallel ? rowZ + r(-1.4, 1.4) : null, rng);
       }
       this.trophyStock.set(index, {
-        initial: Math.max(0, this.trophiesWorld.length - before),
-        lastRespawn: this.time,
+        initial: trophyCount,
+        lastRespawn: this.time - TROPHY_RESPAWN_INTERVAL,
       });
     }
     this.trackGroup.add(group);
@@ -1120,19 +1158,40 @@ export class WaveRunnersGame {
     if (this.trophiesWorld.length >= MAX_ACTIVE_TROPHIES) return null;
     const r = (min, max) => min + rng() * (max - min);
     const chunkStart = index * this.chunkLength;
+    const avoidTrench = (x, z) => {
+      if (!trench || z < trench.z0 - 1 || z > trench.z1 + 1) return { x, z };
+      if (Math.abs(x - trench.x) < trench.width / 2 + 1.2) {
+        return {
+          x: trench.x < 0 ? r(2.5, this.trackWidth / 2 - 2.5) : r(-this.trackWidth / 2 + 2.5, -2.5),
+          z: rng() < 0.5 ? trench.z0 - 3 : trench.z1 + 3,
+        };
+      }
+      return { x, z };
+    };
+    const isOpen = (x, z) => !this.trophiesWorld.some((trophy) => {
+      if (trophy.collected || trophy.chunk !== index) return false;
+      return Math.hypot(trophy.x - x, trophy.z - z) < TROPHY_MIN_SPACING;
+    });
+    let x = 0;
     let z = preferredZ ?? chunkStart + r(5, this.chunkLength - 5);
-    if (trench && z > trench.z0 - 2 && z < trench.z1 + 2) {
-      z = rng() < 0.5 ? trench.z0 - 3 : trench.z1 + 3;
+    let foundOpenSpot = false;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const candidateZ = attempt === 0 && preferredZ !== null ? z : chunkStart + r(5, this.chunkLength - 5);
+      const candidateX = r(-this.trackWidth / 2 + 2.5, this.trackWidth / 2 - 2.5);
+      const point = avoidTrench(candidateX, candidateZ);
+      x = point.x;
+      z = point.z;
+      if (isOpen(x, z)) {
+        foundOpenSpot = true;
+        break;
+      }
     }
+    if (!foundOpenSpot) return null;
     const randomMultiplier = r(1, 5);
     const value = Math.max(5, Math.round((Math.max(3, z) ** 2 * randomMultiplier) / 95));
     const symbol = this.trophySymbolForValue(value, rng);
     const collectNeed = value * r(1, 3);
     const sprite = this.createEmojiSprite(symbol, 1.25 + clamp(value / 300, 0, 0.45));
-    let x = r(-this.trackWidth / 2 + 2.5, this.trackWidth / 2 - 2.5);
-    if (trench && z >= trench.z0 - 1 && z <= trench.z1 + 1 && Math.abs(x - trench.x) < trench.width / 2 + 1.2) {
-      x = trench.x < 0 ? r(2.5, this.trackWidth / 2 - 2.5) : r(-this.trackWidth / 2 + 2.5, -2.5);
-    }
     sprite.position.set(x, 1.35, z);
     this.trophyGroup.add(sprite);
     const priceSprite = this.createTextSprite(`$${value}`, "#171525", "rgba(183,243,74,.92)", 1.75, 0.55, x, 2.75, z);
@@ -1262,7 +1321,7 @@ export class WaveRunnersGame {
   }
 
   updateInput(dt) {
-    if (this.impactState) {
+    if (this.isRunnerImpacted(this.player)) {
       this.player.speed = 0;
       return;
     }
@@ -1313,7 +1372,7 @@ export class WaveRunnersGame {
   }
 
   updateCollecting(dt) {
-    if (this.impactState) return;
+    if (this.isRunnerImpacted(this.player)) return;
     if (this.collecting?.collected) this.collecting = null;
     const harvest = this.keys.has("e") || this.mobileInput.action;
     if (this.nearbyUpgradeMachine()) return;
@@ -1337,6 +1396,34 @@ export class WaveRunnersGame {
       this.playSound("collect");
       this.collecting = null;
       this.checkWinner();
+    }
+  }
+
+  updateRunnerBumpCooldowns(dt) {
+    this.player.bumpCooldown = Math.max(0, (this.player.bumpCooldown ?? 0) - dt);
+    if (this.bot) this.bot.bumpCooldown = Math.max(0, (this.bot.bumpCooldown ?? 0) - dt);
+  }
+
+  updatePlayerBumpAction() {
+    if (!this.bot || !this.remoteGroup?.visible) return;
+    const action = this.keys.has("e") || this.mobileInput.action;
+    if (!action || this.nearbyUpgradeMachine()) return;
+    if (this.bumpRunner(this.player, this.bot)) {
+      this.cancelCollect();
+      this.callbacks.onStatus?.(`${this.bot.name} got bumped.`);
+    }
+  }
+
+  maybeBotBumpPlayer(dangerWave) {
+    if (!this.bot || !this.playerGroup) return;
+    const playerTrench = this.currentTrench(this.player.x, this.player.z);
+    const botTrench = this.currentTrench(this.bot.x, this.bot.z);
+    const sameTrenchUnderPressure = dangerWave && dangerWave.timeToWave < 3.8 && playerTrench && playerTrench === botTrench;
+    const interruptCollect = this.collecting && Math.hypot(this.bot.x - this.player.x, this.bot.z - this.player.z) < RUNNER_BUMP_RADIUS + 0.8;
+    if (!sameTrenchUnderPressure && !interruptCollect) return;
+    if (this.bumpRunner(this.bot, this.player)) {
+      this.cancelCollect();
+      this.callbacks.onStatus?.(`${this.bot.name} bumped you.`);
     }
   }
 
@@ -1486,6 +1573,12 @@ export class WaveRunnersGame {
 
   updateBot(dt) {
     if (!this.bot || this.phase !== "playing" || this.winner) return;
+    if (this.isRunnerImpacted(this.bot)) return;
+    if (!this.bot.grounded) {
+      this.bot.speed += (0 - this.bot.speed) * (1 - Math.exp(-10 * dt));
+      this.updateBotVertical(dt);
+      return;
+    }
     if (this.bot.z < 13) this.updateBotUpgrades();
     if (this.bot.collecting?.collected) {
       this.bot.collecting = null;
@@ -1500,6 +1593,7 @@ export class WaveRunnersGame {
       this.bot.targetTrench = this.findBotSafeTrench(dangerWave);
       if (this.bot.targetTrench) this.setBotState(BOT_STATES.SEEK_TRENCH);
     }
+    this.maybeBotBumpPlayer(dangerWave);
 
     switch (this.bot.state) {
       case BOT_STATES.SEEK_TRENCH:
@@ -1621,7 +1715,19 @@ export class WaveRunnersGame {
   }
 
   updateBotVertical(dt) {
-    this.bot.y += (this.surfaceY(this.bot.x, this.bot.z) - this.bot.y) * (1 - Math.exp(-14 * dt));
+    const groundY = this.surfaceY(this.bot.x, this.bot.z);
+    this.bot.inTrench = groundY < 1;
+    if (!this.bot.grounded) {
+      this.bot.vy -= 24 * dt;
+      this.bot.y += this.bot.vy * dt;
+      if (this.bot.y <= groundY) {
+        this.bot.y = groundY;
+        this.bot.vy = 0;
+        this.bot.grounded = true;
+      }
+      return;
+    }
+    this.bot.y += (groundY - this.bot.y) * (1 - Math.exp(-14 * dt));
   }
 
   moveBotToward(targetX, targetZ, dt, speedScale = 1) {
@@ -1974,22 +2080,94 @@ export class WaveRunnersGame {
     });
   }
 
+  isRunnerImpacted(actor) {
+    return this.impacts.some((state) => state.actor === actor);
+  }
+
+  isLocalImpacted() {
+    return Boolean(this.impactState);
+  }
+
   updateImpact(dt) {
     this.updateImpactParticles(dt);
-    if (!this.impactState) return;
-    const state = this.impactState;
-    state.elapsed += dt;
-    const progress = clamp(state.elapsed / state.duration, 0, 1);
-    const arc = Math.sin(progress * Math.PI) * state.arc;
-    this.player.x = state.from.x + (state.to.x - state.from.x) * progress;
-    this.player.y = state.from.y + (state.to.y - state.from.y) * progress + arc;
-    this.player.z = state.from.z + (state.to.z - state.from.z) * progress;
-    this.player.angle = state.fromAngle + state.spin * progress;
-    this.playerGroup.rotation.x = progress * Math.PI * 4.5;
-    this.playerGroup.rotation.z = Math.sin(progress * Math.PI * 3) * 0.55;
-    this.deathFlash = Math.max(this.deathFlash, 0.35 * (1 - progress));
-    if (progress < 1) return;
-    this.finishDeathReset();
+    if (this.impacts.length === 0) return;
+    this.impacts = this.impacts.filter((state) => {
+      state.elapsed += dt;
+      const progress = clamp(state.elapsed / state.duration, 0, 1);
+      const arc = Math.sin(progress * Math.PI) * state.arc;
+      state.actor.x = state.from.x + (state.to.x - state.from.x) * progress;
+      state.actor.y = state.from.y + (state.to.y - state.from.y) * progress + arc;
+      state.actor.z = state.from.z + (state.to.z - state.from.z) * progress;
+      state.actor.angle = state.fromAngle + state.spin * progress;
+      state.group.rotation.x = progress * Math.PI * 4.5;
+      state.group.rotation.z = Math.sin(progress * Math.PI * 3) * 0.55;
+      if (state.local) this.deathFlash = Math.max(this.deathFlash, 0.35 * (1 - progress));
+      if (progress < 1) return true;
+      state.onFinish?.();
+      return false;
+    });
+  }
+
+  startRunnerImpact({ actor, group, label, to, local = false, blocksWorld = false, duration = 1.05, arc = 9.5, spin = null, onFinish }) {
+    if (!actor || !group || this.isRunnerImpacted(actor)) return;
+    const type = waveTypeById(label.toLowerCase());
+    this.spawnImpactParticles(actor.x, actor.y, actor.z, type.color);
+    const state = {
+      actor,
+      group,
+      label,
+      local,
+      elapsed: 0,
+      duration,
+      from: { x: actor.x, y: actor.y, z: actor.z },
+      to,
+      fromAngle: actor.angle,
+      spin: spin ?? Math.PI * (actor.x < 0 ? -2.8 : 2.8),
+      arc,
+      onFinish,
+    };
+    actor.speed = 0;
+    actor.vx = 0;
+    actor.vy = 0;
+    actor.grounded = false;
+    actor.inTrench = false;
+    this.impacts.push(state);
+    if (local && blocksWorld) this.impactState = state;
+  }
+
+  runnerForward(actor) {
+    return { x: Math.sin(actor.angle), z: Math.cos(actor.angle) };
+  }
+
+  isBehindRunner(source, target) {
+    const forward = this.runnerForward(target);
+    return ((source.x - target.x) * forward.x + (source.z - target.z) * forward.z) < 0;
+  }
+
+  canBumpRunner(source, target) {
+    if (!source || !target || source.bumpCooldown > 0 || this.isRunnerImpacted(source) || this.isRunnerImpacted(target)) return false;
+    if (Math.hypot(source.x - target.x, source.z - target.z) > RUNNER_BUMP_RADIUS) return false;
+    return this.isBehindRunner(source, target);
+  }
+
+  forceRunnerJump(target) {
+    if (!target || target.grounded === false) return false;
+    const groundY = this.surfaceY(target.x, target.z);
+    target.inTrench = groundY < 1;
+    target.y = Math.max(target.y, groundY);
+    target.vy = target.inTrench ? 13.8 : 9.4;
+    target.grounded = false;
+    return true;
+  }
+
+  bumpRunner(source, target) {
+    if (!this.canBumpRunner(source, target)) return false;
+    if (!this.forceRunnerJump(target)) return false;
+    source.bumpCooldown = RUNNER_BUMP_COOLDOWN;
+    target.bumpCooldown = Math.max(target.bumpCooldown ?? 0, 0.35);
+    target.speed = 0;
+    this.playSound("jump");
+    return true;
   }
 
   die(label) {
@@ -1998,37 +2176,20 @@ export class WaveRunnersGame {
     this.callbacks.onStatus?.(`${label} wave smashed you back to start.`);
     this.deathFlash = 1;
     this.playSound("hit");
-    this.spawnImpactParticles(this.player.x, this.player.y, this.player.z, waveTypeById(label.toLowerCase()).color);
-    this.impactState = {
+    this.startRunnerImpact({
+      actor: this.player,
+      group: this.playerGroup,
       label,
-      elapsed: 0,
-      duration: 1.05,
-      from: { x: this.player.x, y: this.player.y, z: this.player.z },
       to: { x: 0, y: 1.55, z: 5 },
-      fromAngle: this.player.angle,
-      spin: Math.PI * (this.player.x < 0 ? -2.8 : 2.8),
-      arc: 9.5,
-    };
-    this.player.speed = 0;
-    this.player.vx = 0;
-    this.player.vy = 0;
-    this.player.grounded = false;
-    this.player.inTrench = false;
+      local: true,
+      blocksWorld: true,
+      onFinish: () => this.finishDeathReset(this.player),
+    });
     this.collecting = null;
   }
 
   finishDeathReset() {
-    this.player.x = 0;
-    this.player.y = 1.55;
-    this.player.z = 5;
-    this.player.vx = 0;
-    this.player.vy = 0;
-    this.player.speed = 0;
-    this.player.angle = 0;
-    this.player.grounded = true;
-    this.player.inTrench = false;
-    this.playerGroup.rotation.x = 0;
-    this.playerGroup.rotation.z = 0;
+    this.resetRunnerAfterImpact(this.player, this.playerGroup, { x: 0, y: 1.55, z: 5, angle: 0 });
     this.collecting = null;
     this.distance = 0;
     this.impactState = null;
@@ -2045,13 +2206,15 @@ export class WaveRunnersGame {
   }
 
   dieBot(label) {
-    if (!this.bot) return;
-    this.callbacks.onStatus?.(`${label} wave hit ${this.bot.name}. Bot is back at start.`);
-    this.bot.x = 3.8;
-    this.bot.y = 1.55;
-    this.bot.z = 5;
-    this.bot.angle = 0;
-    this.bot.speed = 0;
+    if (!this.bot || this.isRunnerImpacted(this.bot)) return;
+    this.callbacks.onStatus?.(`${label} wave smashed ${this.bot.name} back to start.`);
+    this.startRunnerImpact({
+      actor: this.bot,
+      group: this.remoteGroup,
+      label,
+      to: { x: 3.8, y: 1.55, z: 5 },
+      onFinish: () => this.finishBotDeathReset(),
+    });
     this.bot.targetX = 3.8;
     this.bot.targetZ = 18;
     this.bot.targetTrophy = null;
@@ -2062,12 +2225,40 @@ export class WaveRunnersGame {
     this.updateBotUpgrades();
   }
 
+  resetRunnerAfterImpact(actor, group, pose) {
+    actor.x = pose.x;
+    actor.y = pose.y;
+    actor.z = pose.z;
+    actor.vx = 0;
+    actor.vy = 0;
+    actor.speed = 0;
+    actor.angle = pose.angle;
+    actor.grounded = true;
+    actor.inTrench = this.surfaceY(actor.x, actor.z) < 1;
+    group.rotation.x = 0;
+    group.rotation.z = 0;
+  }
+
+  finishBotDeathReset() {
+    if (!this.bot) return;
+    this.resetRunnerAfterImpact(this.bot, this.remoteGroup, { x: 3.8, y: 1.55, z: 5, angle: 0 });
+    this.bot.targetX = 3.8;
+    this.bot.targetZ = 18;
+    this.bot.targetTrophy = null;
+    this.bot.targetTrench = null;
+    this.bot.collecting = null;
+    this.bot.collectValue = 0;
+    this.setBotState(BOT_STATES.RUNNING);
+    this.updateBotUpgrades();
+  }
+
   updateAnimation(dt) {
-    if (this.impactState) return;
-    this.animateCharacter(this.parts, this.player.grounded ? Math.abs(this.player.speed) : 0, 0);
+    if (!this.isRunnerImpacted(this.player)) {
+      this.animateCharacter(this.parts, this.player.grounded ? Math.abs(this.player.speed) : 0, 0);
+    }
     if (this.remoteGroup?.visible) {
       const remoteSpeed = this.bot?.speed ?? this.remotePose?.speed ?? 0;
-      this.animateCharacter(this.remoteParts, Math.abs(remoteSpeed), 0.6);
+      if (!this.bot || !this.isRunnerImpacted(this.bot)) this.animateCharacter(this.remoteParts, Math.abs(remoteSpeed), 0.6);
     }
     for (const trophy of this.trophiesWorld) {
       if (trophy.collected || !trophy.sprite || !trophy.priceSprite) continue;
@@ -2145,17 +2336,19 @@ export class WaveRunnersGame {
       this.frame = requestAnimationFrame(() => this.loop());
       return;
     }
+    this.updateRunnerBumpCooldowns(dt);
     this.updateInput(dt);
-    const wasImpacted = Boolean(this.impactState);
+    const wasLocalImpacted = this.isRunnerImpacted(this.player);
     this.updateImpact(dt);
-    if (!wasImpacted && !this.impactState) {
+    this.generateChunksAround(this.player.z, this.bot?.z ?? this.player.z);
+    this.updateTrophyRespawns();
+    if (!wasLocalImpacted && !this.isRunnerImpacted(this.player)) {
       this.updatePhysics(dt);
-      this.generateChunksAround(this.player.z, this.bot?.z ?? this.player.z);
-      this.updateTrophyRespawns();
       this.updateBaseInteraction();
       this.updateCollecting(dt);
-      this.updateBot(dt);
+      this.updatePlayerBumpAction();
     }
+    this.updateBot(dt);
     this.sendNetworkInput();
     this.updateNetworkHost(dt);
     if (!this.impactState) this.updateWaves(dt);
