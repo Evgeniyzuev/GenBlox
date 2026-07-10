@@ -322,6 +322,53 @@ function playerByIndex(index) {
   return client?.players[index] ?? null;
 }
 
+function playerById(playerId) {
+  return client?.players.find((player) => player.id === playerId) ?? null;
+}
+
+function seatLimitForGame(gameId = activeGameId) {
+  return gameId === "durak" ? 4 : 2;
+}
+
+function createRoomSeats(limit = seatLimitForGame()) {
+  if (!client) return [];
+  const host = client.localPlayer;
+  const others = client.players
+    .filter((player) => player.id !== host?.id)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  return [host, ...others]
+    .filter(Boolean)
+    .slice(0, limit)
+    .map((player, index) => ({
+      playerId: player.id,
+      name: profileForPlayer(player, index === 0 ? "Room Host" : `Player ${index + 1}`),
+    }));
+}
+
+function roomGameSeats(game = null, gameId = activeGameId) {
+  const state = game ?? (mode === "room" ? client?.getGameState(gameId) : null);
+  return Array.isArray(state?.seats) ? state.seats : [];
+}
+
+function roomSeatForLocalPlayer(game = null, gameId = activeGameId) {
+  const playerId = client?.playerId;
+  if (!playerId) return null;
+  const index = roomGameSeats(game, gameId).findIndex((seat) => seat?.playerId === playerId);
+  return index >= 0 ? index : null;
+}
+
+function roomHumanSeatCount(game = null, gameId = activeGameId) {
+  return mode === "room" ? roomGameSeats(game, gameId).length : 1;
+}
+
+function attachRoomSeats(game, previous = null, gameId = activeGameId) {
+  if (mode !== "room" || isRealtimeGame(gameId)) return game;
+  const seats = Array.isArray(previous?.seats) && previous.seats.length
+    ? previous.seats
+    : createRoomSeats(seatLimitForGame(gameId));
+  return { ...game, seats };
+}
+
 function isRealtimeGame(gameId) {
   return gameId === "worms" || gameId === "micromachines" || gameId === "wave-runners";
 }
@@ -537,6 +584,16 @@ function syncRoom() {
     setupRoomLabels();
     openOverlay(elements.gameDialog, "game");
     const game = client.getGameState(activeGameId);
+    if (!isRealtimeGame(activeGameId) && isValidGameState(game) && !roomGameSeats(game).length) {
+      if (client.isHost) {
+        client.setGameState(activeGameId, {
+          ...game,
+          seats: createRoomSeats(seatLimitForGame(activeGameId)),
+          revision: game.revision + 1,
+        });
+      }
+      return;
+    }
     if (activeGameId === "worms") {
       if (client.playerIndex > 1) {
         destroyRealtimeGames();
@@ -614,7 +671,7 @@ function syncRoom() {
       return;
     }
     if (isValidGameState(game)) {
-      renderGame(game, client.playerCount, roomPlayerSide());
+      renderGame(game, roomHumanSeatCount(game), roomPlayerSide());
       queueComputerMove();
     }
   } else if (elements.gameDialog.open && mode === "room") {
@@ -643,8 +700,8 @@ function setupRoomLabels() {
   if (activeGameId === "durak") {
     const side = roomPlayerSide();
     elements.role.textContent = side === null ? "Spectating" : `Seat ${side + 1}`;
-    elements.players.textContent = `Players: ${Math.min(client.playerCount, 4)} / 4`;
-    elements.nameX.textContent = profileForPlayer(playerByIndex(0), "Room Host");
+    elements.players.textContent = `Players: ${roomHumanSeatCount()} / 4`;
+    elements.nameX.textContent = roomGameSeats()[0]?.name ?? profileForPlayer(playerByIndex(0), "Room Host");
     elements.nameO.textContent = "Card table";
     elements.newRound.hidden = !client.isHost;
     elements.hint.textContent = "Durak uses four seats. Empty seats are controlled by bots.";
@@ -653,9 +710,9 @@ function setupRoomLabels() {
   const side = roomPlayerSide();
   if (side === null) {
     elements.role.textContent = "Spectating";
-    elements.players.textContent = `Players: ${Math.min(client.playerCount, 2)} / 2`;
-    elements.nameX.textContent = profileForPlayer(playerByIndex(0), "Room Host");
-    elements.nameO.textContent = profileForPlayer(playerByIndex(1), "Second Player");
+    elements.players.textContent = `Players: ${roomHumanSeatCount()} / 2`;
+    elements.nameX.textContent = roomGameSeats()[0]?.name ?? profileForPlayer(playerByIndex(0), "Room Host");
+    elements.nameO.textContent = roomGameSeats()[1]?.name ?? profileForPlayer(playerByIndex(1), "Second Player");
     elements.newRound.hidden = true;
     elements.hint.textContent = "This game is limited to two active players.";
     return;
@@ -663,9 +720,9 @@ function setupRoomLabels() {
   elements.role.textContent = activeGameId === "checkers"
     ? `You play ${side === CHECKER_COLORS.BLACK ? "black" : "white"}`
     : `You play ${side === "X" ? "×" : "○"}`;
-  elements.players.textContent = `Players: ${Math.min(client.playerCount, 2)} / 2`;
-  elements.nameX.textContent = profileForPlayer(playerByIndex(0), "Room Host");
-  elements.nameO.textContent = profileForPlayer(playerByIndex(1), "Second Player");
+  elements.players.textContent = `Players: ${roomHumanSeatCount()} / 2`;
+  elements.nameX.textContent = roomGameSeats()[0]?.name ?? profileForPlayer(playerByIndex(0), "Room Host");
+  elements.nameO.textContent = roomGameSeats()[1]?.name ?? profileForPlayer(playerByIndex(1), "Second Player");
   elements.newRound.hidden = !client.isHost;
   elements.hint.textContent = "The × button ends the game and returns the whole room to the catalog.";
 }
@@ -719,18 +776,20 @@ function setupGameShell() {
 }
 
 function roomPlayerSide() {
+  const seat = roomSeatForLocalPlayer();
   if (activeGameId === "checkers") {
-    if (client.playerIndex > 1) return null;
-    return client.isHost ? CHECKER_COLORS.BLACK : CHECKER_COLORS.WHITE;
+    if (seat === null || seat > 1) return null;
+    return seat === 0 ? CHECKER_COLORS.BLACK : CHECKER_COLORS.WHITE;
   }
   if (activeGameId === "reversi") {
-    if (client.playerIndex > 1) return null;
-    return client.isHost ? REVERSI_COLORS.BLACK : REVERSI_COLORS.WHITE;
+    if (seat === null || seat > 1) return null;
+    return seat === 0 ? REVERSI_COLORS.BLACK : REVERSI_COLORS.WHITE;
   }
   if (activeGameId === "durak") {
-    return client.playerIndex >= 0 && client.playerIndex < 4 ? client.playerIndex : null;
+    return seat;
   }
-  return client.mark;
+  if (seat === null || seat > 1) return null;
+  return seat === 0 ? "X" : "O";
 }
 
 function isValidGameState(game) {
@@ -742,11 +801,24 @@ function isValidGameState(game) {
 }
 
 function createGameForActive(previous = null) {
-  if (activeGameId === "checkers") return createCheckersGame(isCheckersState(previous) ? previous : null);
-  if (activeGameId === "five-in-row") return createFiveInRowGame(isFiveInRowState(previous) ? previous : null);
-  if (activeGameId === "reversi") return createReversiGame(isReversiState(previous) ? previous : null);
-  if (activeGameId === "durak") return createDurakGame(isDurakState(previous) ? previous : null);
-  return createGame(isGameState(previous) ? previous : null);
+  if (activeGameId === "checkers") {
+    const validPrevious = isCheckersState(previous) ? previous : null;
+    return attachRoomSeats(createCheckersGame(validPrevious), validPrevious);
+  }
+  if (activeGameId === "five-in-row") {
+    const validPrevious = isFiveInRowState(previous) ? previous : null;
+    return attachRoomSeats(createFiveInRowGame(validPrevious), validPrevious);
+  }
+  if (activeGameId === "reversi") {
+    const validPrevious = isReversiState(previous) ? previous : null;
+    return attachRoomSeats(createReversiGame(validPrevious), validPrevious);
+  }
+  if (activeGameId === "durak") {
+    const game = createDurakGame(isDurakState(previous) ? previous : null);
+    return attachRoomSeats(game, isDurakState(previous) ? previous : null);
+  }
+  const validPrevious = isGameState(previous) ? previous : null;
+  return attachRoomSeats(createGame(validPrevious), validPrevious);
 }
 
 function openSoloGame(gameId) {
@@ -918,8 +990,9 @@ function makeMove(index) {
   }
 
   const current = client?.getGameState(activeGameId);
-  if (!isGameState(current) || client.playerCount < 2) return;
-  const next = playMove(current, index, client.mark);
+  const side = roomPlayerSide();
+  if (!isGameState(current) || side === null || roomHumanSeatCount(current) < 2) return;
+  const next = playMove(current, index, side);
   if (next !== current) client.setGameState(activeGameId, next);
 }
 
@@ -931,7 +1004,7 @@ function pieceColor(piece) {
 function makeCheckersMove(index) {
   const game = mode === "solo" ? localGame : client?.getGameState(activeGameId);
   const side = mode === "solo" ? CHECKER_COLORS.BLACK : roomPlayerSide();
-  if (!isCheckersState(game) || game.turn !== side || (mode === "room" && client.playerCount < 2)) return;
+  if (!isCheckersState(game) || game.turn !== side || (mode === "room" && roomHumanSeatCount(game) < 2)) return;
 
   const legalMoves = getCheckersMoves(game, side);
   const chosenMove = selectedChecker === null
@@ -969,15 +1042,16 @@ function makeFiveInRowMove(index) {
   }
 
   const current = client?.getGameState(activeGameId);
-  if (!isFiveInRowState(current) || client.playerCount < 2) return;
-  const next = playFiveInRowMove(current, index, client.mark);
+  const side = roomPlayerSide();
+  if (!isFiveInRowState(current) || side === null || roomHumanSeatCount(current) < 2) return;
+  const next = playFiveInRowMove(current, index, side);
   if (next !== current) client.setGameState(activeGameId, next);
 }
 
 function makeReversiMove(index) {
   const side = mode === "solo" ? REVERSI_COLORS.BLACK : roomPlayerSide();
   const game = mode === "solo" ? localGame : client?.getGameState(activeGameId);
-  if (!isReversiState(game) || game.turn !== side || (mode === "room" && client.playerCount < 2)) return;
+  if (!isReversiState(game) || game.turn !== side || (mode === "room" && roomHumanSeatCount(game) < 2)) return;
   const next = playReversiMove(game, index, side);
   if (next === game) return;
   if (mode === "solo") {
@@ -986,7 +1060,6 @@ function makeReversiMove(index) {
     queueComputerMove();
   } else {
     client.setGameState(activeGameId, next);
-    if (client?.isHost) setTimeout(queueComputerMove, 0);
   }
 }
 
@@ -1005,6 +1078,7 @@ function playDurakAction(action, cardId = null) {
     queueComputerMove();
   } else {
     client.setGameState(activeGameId, next);
+    if (client?.isHost) setTimeout(queueComputerMove, 0);
   }
 }
 
@@ -1013,7 +1087,7 @@ function queueComputerMove() {
 
   if (activeGameId === "durak") {
     if (!isDurakState(game) || game.winner !== null) return;
-    const humanSeats = mode === "room" ? Math.min(client?.playerCount ?? 1, 4) : 1;
+    const humanSeats = roomHumanSeatCount(game);
     const botTurn = game.turn >= humanSeats;
     if (!botTurn || (mode === "room" && !client?.isHost)) return;
     if (computerTimer) return;
@@ -1179,8 +1253,10 @@ function renderDurak(game, mySeat) {
   game.players.forEach((player, index) => {
     const seat = document.createElement("div");
     seat.className = `durak-player${index === mySeat ? " is-you" : ""}${index === game.turn ? " is-turn" : ""}`;
-    const label = mode === "room" && index < (client?.playerCount ?? 0)
-      ? profileForPlayer(playerByIndex(index), index === 0 ? "Room Host" : `Player ${index + 1}`)
+    const assignedSeat = roomGameSeats(game)[index];
+    const assignedPlayer = assignedSeat ? playerById(assignedSeat.playerId) : null;
+    const label = mode === "room" && assignedSeat
+      ? (assignedPlayer ? profileForPlayer(assignedPlayer, assignedSeat.name) : assignedSeat.name)
       : index === 0 && mode === "solo"
         ? `${playerProfile.avatar} ${playerProfile.name}`
         : `Bot ${index + 1}`;
