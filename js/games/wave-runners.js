@@ -30,11 +30,12 @@ const SOUND_STORAGE_KEY = "genblox:wave-runners-muted";
 const INITIAL_SPEED_UPGRADE_COST = 90;
 const INITIAL_COLLECT_UPGRADE_COST = 70;
 const MATCH_TARGETS = [20000, 50000, 100000, 200000, 500000, 1000000];
+const PLAYER_COUNT_OPTIONS = [2, 3, 4, 5, 6];
 const MAX_ACTIVE_TROPHIES = 180;
 const TROPHY_RESPAWN_INTERVAL = 30;
 const WAVE_QUEUE_SECONDS = 30;
-const PLAYER_COLORS = [0x4aa7ff, 0xff8a3d];
-const PLAYER_HAIR_COLORS = [0x2b1f27, 0x412f18];
+const PLAYER_COLORS = [0x4aa7ff, 0xff8a3d, 0xb7f34a, 0xff668c, 0x9478ff, 0xffd36a];
+const PLAYER_HAIR_COLORS = [0x2b1f27, 0x412f18, 0x1d3722, 0x59283a, 0x262450, 0x5c3b15];
 const TROPHY_TIERS = [
   { max: 500, items: ["🥦", "🥕", "🧅"] },
   { max: 1000, items: ["🍇", "🍌", "🍓"] },
@@ -133,38 +134,20 @@ export class WaveRunnersGame {
     this.trophies = 0;
     this.lootValue = 0;
     this.totalScore = 0;
-    this.bot = callbacks.bot === false ? null : {
-      name: "Bot",
-      score: 0,
-      money: 0,
-      x: 3.8,
-      y: 1.55,
-      z: 5,
-      angle: 0,
-      speed: 0,
-      vy: 0,
-      grounded: true,
-      inTrench: false,
-      targetX: 3.8,
-      targetZ: 18,
-      state: BOT_STATES.RUNNING,
-      collecting: null,
-      collectValue: 0,
-      targetTrophy: null,
-      targetTrench: null,
-      speedLevel: 0,
-      collectRateLevel: 0,
-      speedUpgradeCost: INITIAL_SPEED_UPGRADE_COST,
-      collectUpgradeCost: INITIAL_COLLECT_UPGRADE_COST,
-      bumpCooldown: 0,
-      box: new THREE.Box3(),
-    };
+    this.allowBots = callbacks.bot !== false;
+    this.totalPlayerCount = PLAYER_COUNT_OPTIONS[0];
+    this.bots = [];
+    this.bot = null;
     this.network = callbacks.network ?? null;
     this.netcode = new RealtimeSnapshotChannel({ network: this.network, kind: "wave-runners", playerId: "solo" });
     this.networkRole = this.netcode.role;
     this.playerId = this.netcode.playerId;
     this.humanSlots = this.normalizeHumanSlots(this.resolveHumanSlots());
     this.localSlot = this.findLocalSlot();
+    this.chunkLength = 34;
+    this.trackWidth = 34;
+    this.totalPlayerCount = Math.max(this.totalPlayerCount, this.humanSlots.length || 1);
+    this.syncBotsForPlayerCount(this.totalPlayerCount);
     this.selectedMap = WAVE_MAPS[0];
     this.money = 0;
     this.speedLevel = 0;
@@ -182,8 +165,6 @@ export class WaveRunnersGame {
     this.audio = null;
     this.audioReady = false;
     this.ambience = null;
-    this.chunkLength = 34;
-    this.trackWidth = 34;
     this.chunks = new Map();
     this.trenches = [];
     this.trophiesWorld = [];
@@ -378,6 +359,8 @@ export class WaveRunnersGame {
     this.remoteParts = this.remoteGroup.userData.parts;
     this.remoteGroup.visible = Boolean(this.bot || this.network);
     this.scene.add(this.remoteGroup);
+    this.remoteGroups = new Map();
+    this.remoteGroups.set("primary", { group: this.remoteGroup, parts: this.remoteParts, slot: this.remoteSlot() });
     this.updatePlayerPalette();
 
     this.resize();
@@ -478,10 +461,62 @@ export class WaveRunnersGame {
     return group;
   }
 
+  createBot(slot = 1) {
+    const lane = (slot - (this.totalPlayerCount - 1) / 2) * 2.6;
+    return {
+      id: `bot-${slot}`,
+      slot,
+      name: `Bot ${slot + 1}`,
+      score: 0,
+      money: 0,
+      x: clamp(lane, -this.trackWidth / 2 + 2, this.trackWidth / 2 - 2),
+      y: 1.55,
+      z: 5 + slot * 1.2,
+      angle: 0,
+      speed: 0,
+      vy: 0,
+      grounded: true,
+      inTrench: false,
+      targetX: clamp(lane, -this.trackWidth / 2 + 2, this.trackWidth / 2 - 2),
+      targetZ: 18 + slot * 1.2,
+      state: BOT_STATES.RUNNING,
+      collecting: null,
+      collectValue: 0,
+      targetTrophy: null,
+      targetTrench: null,
+      speedLevel: 0,
+      collectRateLevel: 0,
+      speedUpgradeCost: INITIAL_SPEED_UPGRADE_COST,
+      collectUpgradeCost: INITIAL_COLLECT_UPGRADE_COST,
+      bumpCooldown: 0,
+      box: new THREE.Box3(),
+    };
+  }
+
+  syncBotsForPlayerCount(count = this.totalPlayerCount) {
+    const total = clamp(Math.round(count), PLAYER_COUNT_OPTIONS[0], PLAYER_COUNT_OPTIONS[PLAYER_COUNT_OPTIONS.length - 1]);
+    this.totalPlayerCount = Math.max(total, this.humanSlots?.length ?? 1);
+    if (!this.allowBots || this.networkRole === "guest") {
+      this.bots = [];
+      this.bot = null;
+      return;
+    }
+    const occupied = new Set((this.humanSlots ?? []).map((entry) => entry.slot));
+    const desiredSlots = [];
+    for (let slot = 0; slot < this.totalPlayerCount; slot += 1) {
+      if (!occupied.has(slot)) desiredSlots.push(slot);
+    }
+    this.bots = desiredSlots.map((slot) => {
+      const existing = this.bots.find((bot) => bot.slot === slot);
+      return existing ?? this.createBot(slot);
+    });
+    this.bot = this.bots[0] ?? null;
+  }
+
   resolveHumanSlots() {
     if (!this.network) return [{ playerId: "solo", slot: 0, name: "You" }];
     const players = this.network.getPlayers?.() ?? [];
-    return players.slice(0, 2).map((player, slot) => ({
+    return players.slice(0, PLAYER_COUNT_OPTIONS[PLAYER_COUNT_OPTIONS.length - 1]).map((player, slot) => ({
       playerId: player.id,
       slot,
       name: player.name ?? (slot === 0 ? "Host" : `Player ${slot + 1}`),
@@ -491,7 +526,7 @@ export class WaveRunnersGame {
   normalizeHumanSlots(slots = []) {
     const seen = new Set();
     return slots
-      .filter((entry) => entry?.playerId && Number.isInteger(entry.slot) && entry.slot >= 0 && entry.slot < 2)
+      .filter((entry) => entry?.playerId && Number.isInteger(entry.slot) && entry.slot >= 0 && entry.slot < PLAYER_COUNT_OPTIONS[PLAYER_COUNT_OPTIONS.length - 1])
       .sort((a, b) => a.slot - b.slot)
       .filter((entry) => {
         if (seen.has(entry.playerId) || seen.has(`slot:${entry.slot}`)) return false;
@@ -539,12 +574,43 @@ export class WaveRunnersGame {
     this.materials.remoteHair.color.setHex(PLAYER_HAIR_COLORS[remoteSlot]);
   }
 
+  createRunnerMaterials(slot = 1) {
+    const index = clamp(slot, 0, PLAYER_COLORS.length - 1);
+    return {
+      body: new THREE.MeshStandardMaterial({ color: PLAYER_COLORS[index], roughness: 0.65 }),
+      hair: new THREE.MeshStandardMaterial({ color: PLAYER_HAIR_COLORS[index], roughness: 0.75 }),
+    };
+  }
+
+  getRemoteVisual(id = "primary", slot = 1) {
+    if (!this.remoteGroups) return null;
+    const key = id ?? "primary";
+    const existing = this.remoteGroups.get(key);
+    if (existing) return existing;
+    const materials = this.createRunnerMaterials(slot);
+    const group = this.createPlayer(materials);
+    group.visible = false;
+    this.scene.add(group);
+    const visual = { group, parts: group.userData.parts, slot, materials };
+    this.remoteGroups.set(key, visual);
+    return visual;
+  }
+
+  hideUnusedRemoteVisuals(activeIds) {
+    if (!this.remoteGroups) return;
+    for (const [id, visual] of this.remoteGroups.entries()) {
+      if (!activeIds.has(id)) visual.group.visible = false;
+    }
+  }
+
   refreshHumanSlotsFromNetwork() {
     if (!this.network || this.networkRole !== "host") return;
     const slots = this.normalizeHumanSlots(this.resolveHumanSlots());
     if (slots.length === 0 || this.humanSlotsKey(slots) === this.humanSlotsKey()) return;
     this.humanSlots = slots;
     this.localSlot = this.findLocalSlot();
+    this.totalPlayerCount = Math.max(this.totalPlayerCount, this.humanSlots.length);
+    this.syncBotsForPlayerCount(this.totalPlayerCount);
     this.updatePlayerPalette();
   }
 
@@ -595,6 +661,24 @@ export class WaveRunnersGame {
 
   buildGoalChoice() {
     this.goalChoice.innerHTML = "<strong>CHOOSE RUN</strong>";
+    const playerPicker = document.createElement("div");
+    playerPicker.className = "wave-player-count";
+    const label = document.createElement("span");
+    label.textContent = "PLAYERS";
+    playerPicker.append(label);
+    PLAYER_COUNT_OPTIONS.forEach((count) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = String(count);
+      button.classList.toggle("is-selected", count === this.totalPlayerCount);
+      button.addEventListener("click", () => {
+        this.totalPlayerCount = count;
+        this.syncBotsForPlayerCount(count);
+        playerPicker.querySelectorAll("button").forEach((item) => item.classList.toggle("is-selected", Number(item.textContent) === count));
+      });
+      playerPicker.append(button);
+    });
+    this.goalChoice.append(playerPicker);
     WAVE_MAPS.forEach((map) => {
       const card = document.createElement("article");
       card.className = "wave-map-card";
@@ -610,7 +694,7 @@ export class WaveRunnersGame {
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = `$${target.toLocaleString("en-US")}`;
-        button.addEventListener("click", () => this.startMatch(target, map.id));
+        button.addEventListener("click", () => this.startMatch(target, map.id, this.totalPlayerCount));
         targets.append(button);
       });
       card.append(preview, title, subtitle, targets);
@@ -618,8 +702,10 @@ export class WaveRunnersGame {
     });
   }
 
-  startMatch(targetScore = MATCH_TARGETS[0], mapId = this.selectedMap.id, publish = true) {
+  startMatch(targetScore = MATCH_TARGETS[0], mapId = this.selectedMap.id, playerCount = this.totalPlayerCount, publish = true) {
     this.initAudio();
+    this.totalPlayerCount = clamp(Math.round(playerCount), PLAYER_COUNT_OPTIONS[0], PLAYER_COUNT_OPTIONS[PLAYER_COUNT_OPTIONS.length - 1]);
+    this.syncBotsForPlayerCount(this.totalPlayerCount);
     this.resetRunState();
     this.applyMap(mapId);
     this.targetScore = targetScore;
@@ -667,29 +753,16 @@ export class WaveRunnersGame {
     this.pendingClaimId = null;
     this.disposeObject3D(this.houseTrophyGroup);
     this.houseTrophyGroup.clear();
-    if (this.bot) {
-      this.bot.score = 0;
-      this.bot.money = 0;
-      this.bot.speedLevel = 0;
-      this.bot.collectRateLevel = 0;
-      this.bot.speedUpgradeCost = INITIAL_SPEED_UPGRADE_COST;
-      this.bot.collectUpgradeCost = INITIAL_COLLECT_UPGRADE_COST;
-      this.bot.x = 3.8;
-      this.bot.y = 1.55;
-      this.bot.z = 5;
-      this.bot.angle = 0;
-      this.bot.speed = 0;
-      this.bot.vy = 0;
-      this.bot.grounded = true;
-      this.bot.inTrench = false;
-      this.bot.targetX = 3.8;
-      this.bot.targetZ = 18;
-      this.bot.targetTrophy = null;
-      this.bot.targetTrench = null;
-      this.bot.collecting = null;
-      this.bot.collectValue = 0;
-      this.setBotState(BOT_STATES.RUNNING);
-    }
+    this.syncBotsForPlayerCount(this.totalPlayerCount);
+    this.bots.forEach((bot) => {
+      const fresh = this.createBot(bot.slot);
+      Object.assign(bot, {
+        ...fresh,
+        box: bot.box,
+      });
+      bot.box ??= new THREE.Box3();
+    });
+    this.bot = this.bots[0] ?? null;
     this.resetWorldGeometry();
   }
 
@@ -726,7 +799,7 @@ export class WaveRunnersGame {
     this.waveSerial = 0;
     this.lastWaveEventAt = 0;
     this.nextWaveIn = 2.8;
-    this.generateChunksAround(this.player.z, this.bot?.z ?? this.player.z);
+    this.generateChunksAround(this.player.z, this.frontRunnerZ());
   }
 
   createUpgradeMachine(x, z, label, cost, color) {
@@ -1261,8 +1334,20 @@ export class WaveRunnersGame {
     return this.currentTrench(x, z)?.depth ?? 1.55;
   }
 
+  activeBotList() {
+    return this.bots ?? (this.bot ? [this.bot] : []);
+  }
+
+  frontRunnerZ() {
+    return Math.max(this.player.z, ...this.activeBotList().map((bot) => bot.z));
+  }
+
+  trailingRunnerZ() {
+    return Math.min(this.player.z, ...this.activeBotList().map((bot) => bot.z));
+  }
+
   makeWaveEvent(at) {
-    const frontZ = Math.max(this.player.z, this.bot?.z ?? this.player.z);
+    const frontZ = this.frontRunnerZ();
     const difficulty = clamp(Math.max(this.distance, frontZ) / 650, 0, 1);
     const roll = Math.random();
     const type = roll < 0.14
@@ -1284,7 +1369,7 @@ export class WaveRunnersGame {
   }
 
   nextWaveDelay() {
-    const frontZ = Math.max(this.player.z, this.bot?.z ?? this.player.z);
+    const frontZ = this.frontRunnerZ();
     const difficulty = clamp(Math.max(this.distance, frontZ) / 650, 0, 1);
     const basis = WAVE_TYPES[1 + Math.floor(Math.random() * (WAVE_TYPES.length - 1))];
     return Math.max(1.45, (basis.interval - difficulty * 1.55) * this.selectedMap.waveIntervalMultiplier * rand(0.7, 1.3));
@@ -1301,7 +1386,7 @@ export class WaveRunnersGame {
 
   spawnWave(event = null) {
     const waveEvent = event ?? this.makeWaveEvent(this.time);
-    const frontZ = Math.max(this.player.z, this.bot?.z ?? this.player.z);
+    const frontZ = this.frontRunnerZ();
     const type = waveTypeById(waveEvent.type);
     this.createWaveMesh(type, frontZ + (waveEvent.lead ?? 150 * this.selectedMap.waveLeadMultiplier), waveEvent.speed, waveEvent.id);
     this.lastWaveEventAt = Math.max(this.lastWaveEventAt, waveEvent.at ?? this.time);
@@ -1408,16 +1493,21 @@ export class WaveRunnersGame {
 
   updateRunnerBumpCooldowns(dt) {
     this.player.bumpCooldown = Math.max(0, (this.player.bumpCooldown ?? 0) - dt);
-    if (this.bot) this.bot.bumpCooldown = Math.max(0, (this.bot.bumpCooldown ?? 0) - dt);
+    this.activeBotList().forEach((bot) => {
+      bot.bumpCooldown = Math.max(0, (bot.bumpCooldown ?? 0) - dt);
+    });
     this.remoteBumpCooldown = Math.max(0, this.remoteBumpCooldown - dt);
   }
 
   updatePlayerBumpAction() {
     const action = this.keys.has("e") || this.mobileInput.action;
     if (!action || this.nearbyUpgradeMachine()) return;
-    if (this.bot && this.remoteGroup?.visible && this.bumpRunner(this.player, this.bot)) {
+    const targetBot = this.activeBotList()
+      .filter((bot) => this.canBumpRunner(this.player, bot))
+      .sort((a, b) => Math.hypot(a.x - this.player.x, a.z - this.player.z) - Math.hypot(b.x - this.player.x, b.z - this.player.z))[0];
+    if (targetBot && this.bumpRunner(this.player, targetBot)) {
       this.cancelCollect();
-      this.callbacks.onStatus?.(`${this.bot.name} got bumped.`);
+      this.callbacks.onStatus?.(`${targetBot.name} got bumped.`);
       return;
     }
     const remote = this.remoteRunnerEntry();
@@ -1434,7 +1524,9 @@ export class WaveRunnersGame {
   }
 
   remoteRunnerEntry() {
-    return this.remoteRanking.find((entry) => entry.id !== this.playerId && entry.pose) ?? null;
+    return (this.remoteRanking ?? [])
+      .filter((entry) => entry.id !== this.playerId && entry.pose)
+      .sort((a, b) => Math.hypot((a.pose.x ?? 0) - this.player.x, (a.pose.z ?? 0) - this.player.z) - Math.hypot((b.pose.x ?? 0) - this.player.x, (b.pose.z ?? 0) - this.player.z))[0] ?? null;
   }
 
   maybeBotBumpPlayer(dangerWave) {
@@ -1518,6 +1610,7 @@ export class WaveRunnersGame {
       phase: this.phase,
       mapId: this.selectedMap.id,
       humanSlots: this.humanSlots,
+      playerCount: this.totalPlayerCount,
       targetScore: this.targetScore,
       winner: this.winner,
       claimed: [...this.claimedTrophyIds],
@@ -1545,6 +1638,7 @@ export class WaveRunnersGame {
       this.networkQueueExpired = false;
     }
     this.targetScore = snapshot.targetScore ?? this.targetScore;
+    this.totalPlayerCount = clamp(Math.round(snapshot.playerCount ?? this.totalPlayerCount), PLAYER_COUNT_OPTIONS[0], PLAYER_COUNT_OPTIONS[PLAYER_COUNT_OPTIONS.length - 1]);
     const snapshotSlots = this.normalizeHumanSlots(snapshot.humanSlots ?? []);
     if (snapshotSlots.length > 0 && this.humanSlotsKey(snapshotSlots) !== this.humanSlotsKey()) {
       this.humanSlots = snapshotSlots;
@@ -1658,6 +1752,15 @@ export class WaveRunnersGame {
         break;
     }
     this.updateBotVertical(dt);
+  }
+
+  updateBots(dt) {
+    const previousBot = this.bot;
+    this.activeBotList().forEach((bot) => {
+      this.bot = bot;
+      this.updateBot(dt);
+    });
+    this.bot = previousBot ?? this.bots[0] ?? null;
   }
 
   botCollectRate() {
@@ -1899,20 +2002,21 @@ export class WaveRunnersGame {
   rankingEntries() {
     const localName = this.playerName(this.playerId);
     const entries = [{ id: this.playerId, name: localName, score: this.totalScore, pose: this.playerPose() }];
-    if (this.bot) {
+    this.activeBotList().forEach((bot) => {
       entries.push({
-        id: "bot",
-        name: this.bot.name,
-        score: this.bot.score,
+        id: bot.id,
+        name: bot.name,
+        score: bot.score,
         pose: {
-          x: Number(this.bot.x.toFixed(2)),
-          y: Number(this.bot.y.toFixed(2)),
-          z: Number(this.bot.z.toFixed(2)),
-          angle: Number(this.bot.angle.toFixed(3)),
-          speed: Number(this.bot.speed.toFixed(2)),
+          x: Number(bot.x.toFixed(2)),
+          y: Number(bot.y.toFixed(2)),
+          z: Number(bot.z.toFixed(2)),
+          angle: Number(bot.angle.toFixed(3)),
+          speed: Number(bot.speed.toFixed(2)),
+          slot: bot.slot,
         },
       });
-    }
+    });
     if (this.remoteRanking) {
       this.remoteRanking.forEach((entry) => {
         if (entry.id !== this.playerId) entries.push(entry);
@@ -1932,15 +2036,24 @@ export class WaveRunnersGame {
   }
 
   updateRemoteVisual(dt) {
-    if (!this.remoteGroup) return;
-    const source = this.bot ?? this.remotePose;
-    this.remoteGroup.visible = Boolean(source);
-    if (!source) return;
-    const target = new THREE.Vector3(source.x ?? 0, source.y ?? 1.55, source.z ?? 5);
-    this.remoteGroup.position.lerp(target, 1 - Math.exp(-12 * dt));
-    const angle = source.angle ?? 0;
-    const delta = Math.atan2(Math.sin(angle - this.remoteGroup.rotation.y), Math.cos(angle - this.remoteGroup.rotation.y));
-    this.remoteGroup.rotation.y += delta * (1 - Math.exp(-12 * dt));
+    const activeIds = new Set();
+    const sources = [];
+    this.activeBotList().forEach((bot) => sources.push({ id: bot.id, slot: bot.slot, pose: bot }));
+    (this.remoteRanking ?? []).forEach((entry) => {
+      if (entry.id !== this.playerId && entry.pose) sources.push({ id: entry.id, slot: entry.pose.slot ?? this.remoteSlot(), pose: entry.pose });
+    });
+    sources.forEach((source) => {
+      const visual = this.getRemoteVisual(source.id, source.slot);
+      if (!visual) return;
+      activeIds.add(source.id);
+      visual.group.visible = true;
+      const target = new THREE.Vector3(source.pose.x ?? 0, source.pose.y ?? 1.55, source.pose.z ?? 5);
+      visual.group.position.lerp(target, 1 - Math.exp(-12 * dt));
+      const angle = source.pose.angle ?? 0;
+      const delta = Math.atan2(Math.sin(angle - visual.group.rotation.y), Math.cos(angle - visual.group.rotation.y));
+      visual.group.rotation.y += delta * (1 - Math.exp(-12 * dt));
+    });
+    this.hideUnusedRemoteVisuals(activeIds);
   }
 
   checkWinner() {
@@ -2041,20 +2154,22 @@ export class WaveRunnersGame {
     this.playerGroup.position.set(this.player.x, this.player.y, this.player.z);
     this.playerGroup.rotation.y = this.player.angle;
     const playerBox = this.player.box.setFromObject(this.playerGroup);
-    let botBox = null;
-    if (this.bot && this.remoteGroup?.visible) {
-      this.remoteGroup.position.set(this.bot.x, this.bot.y, this.bot.z);
-      this.remoteGroup.rotation.y = this.bot.angle;
-      botBox = this.bot.box.setFromObject(this.remoteGroup);
-    }
+    const botBoxes = this.activeBotList().map((bot) => {
+      const visual = this.getRemoteVisual(bot.id, bot.slot);
+      if (!visual) return null;
+      visual.group.position.set(bot.x, bot.y, bot.z);
+      visual.group.rotation.y = bot.angle;
+      return { bot, box: bot.box.setFromObject(visual.group) };
+    }).filter(Boolean);
     for (const wave of this.waves) {
       wave.mesh.position.z -= wave.speed * dt;
       wave.mesh.scale.y = 1 + Math.sin(this.time * 12 + wave.mesh.position.z) * 0.06;
       wave.box.setFromObject(wave.mesh);
-      if (botBox && wave.box.intersectsBox(botBox)) {
-        if (!wave.type.harmless && this.bot.z >= 12 && !this.isBotSafeInTrench()) {
-          this.dieBot(wave.type.label);
-          botBox = null;
+      for (const botHit of botBoxes) {
+        if (wave.box.intersectsBox(botHit.box)) {
+          if (!wave.type.harmless && botHit.bot.z >= 12 && !this.isBotSafeInTrench(botHit.bot)) {
+            this.dieBot(wave.type.label, botHit.bot);
+          }
         }
       }
       if (wave.box.intersectsBox(playerBox)) {
@@ -2073,7 +2188,7 @@ export class WaveRunnersGame {
       }
     }
     this.waves = this.waves.filter((wave) => {
-      const trailingZ = Math.min(this.player.z, this.bot?.z ?? this.player.z);
+      const trailingZ = this.trailingRunnerZ();
       if (wave.mesh.position.z < trailingZ - 24) {
         this.waveGroup.remove(wave.mesh);
         wave.mesh.geometry.dispose();
@@ -2084,9 +2199,9 @@ export class WaveRunnersGame {
     });
   }
 
-  isBotSafeInTrench() {
-    if (!this.bot) return false;
-    return this.surfaceY(this.bot.x, this.bot.z) < 1 && this.bot.y < 0.05;
+  isBotSafeInTrench(bot = this.bot) {
+    if (!bot) return false;
+    return this.surfaceY(bot.x, bot.z) < 1 && bot.y < 0.05;
   }
 
   spawnImpactParticles(x, y, z, color = 0xf8f7ff) {
@@ -2246,24 +2361,28 @@ export class WaveRunnersGame {
     }
   }
 
-  dieBot(label) {
-    if (!this.bot || this.isRunnerImpacted(this.bot)) return;
-    this.callbacks.onStatus?.(`${label} wave smashed ${this.bot.name} back to start.`);
+  dieBot(label, bot = this.bot) {
+    if (!bot || this.isRunnerImpacted(bot)) return;
+    const visual = this.getRemoteVisual(bot.id, bot.slot);
+    this.callbacks.onStatus?.(`${label} wave smashed ${bot.name} back to start.`);
     this.startRunnerImpact({
-      actor: this.bot,
-      group: this.remoteGroup,
+      actor: bot,
+      group: visual?.group ?? this.remoteGroup,
       label,
-      to: { x: 3.8, y: 1.55, z: 5 },
-      onFinish: () => this.finishBotDeathReset(),
+      to: { x: bot.targetX ?? 3.8, y: 1.55, z: 5 + bot.slot * 1.2 },
+      onFinish: () => this.finishBotDeathReset(bot),
     });
-    this.bot.targetX = 3.8;
-    this.bot.targetZ = 18;
-    this.bot.targetTrophy = null;
-    this.bot.targetTrench = null;
-    this.bot.collecting = null;
-    this.bot.collectValue = 0;
+    const previousBot = this.bot;
+    this.bot = bot;
+    bot.targetX = bot.targetX ?? 3.8;
+    bot.targetZ = 18 + bot.slot * 1.2;
+    bot.targetTrophy = null;
+    bot.targetTrench = null;
+    bot.collecting = null;
+    bot.collectValue = 0;
     this.setBotState(BOT_STATES.DEAD_RESET);
     this.updateBotUpgrades();
+    this.bot = previousBot;
   }
 
   resetRunnerAfterImpact(actor, group, pose) {
@@ -2280,31 +2399,43 @@ export class WaveRunnersGame {
     group.rotation.z = 0;
   }
 
-  finishBotDeathReset() {
-    if (!this.bot) return;
-    this.resetRunnerAfterImpact(this.bot, this.remoteGroup, { x: 3.8, y: 1.55, z: 5, angle: 0 });
-    this.bot.targetX = 3.8;
-    this.bot.targetZ = 18;
-    this.bot.targetTrophy = null;
-    this.bot.targetTrench = null;
-    this.bot.collecting = null;
-    this.bot.collectValue = 0;
+  finishBotDeathReset(bot = this.bot) {
+    if (!bot) return;
+    const visual = this.getRemoteVisual(bot.id, bot.slot);
+    const start = this.createBot(bot.slot);
+    this.resetRunnerAfterImpact(bot, visual?.group ?? this.remoteGroup, { x: start.x, y: 1.55, z: start.z, angle: 0 });
+    bot.targetX = start.targetX;
+    bot.targetZ = start.targetZ;
+    bot.targetTrophy = null;
+    bot.targetTrench = null;
+    bot.collecting = null;
+    bot.collectValue = 0;
+    const previousBot = this.bot;
+    this.bot = bot;
     this.setBotState(BOT_STATES.RUNNING);
     this.updateBotUpgrades();
+    this.bot = previousBot;
   }
 
   updateAnimation(dt) {
     if (!this.isRunnerImpacted(this.player)) {
       this.animateCharacter(this.parts, this.player.grounded ? Math.abs(this.player.speed) : 0, 0);
     }
-    if (this.remoteGroup?.visible) {
-      const remoteSpeed = this.bot?.speed ?? this.remotePose?.speed ?? 0;
-      if (!this.bot || !this.isRunnerImpacted(this.bot)) this.animateCharacter(this.remoteParts, Math.abs(remoteSpeed), 0.6);
+    const speedById = new Map();
+    this.activeBotList().forEach((bot) => speedById.set(bot.id, { speed: bot.speed, impacted: this.isRunnerImpacted(bot) }));
+    (this.remoteRanking ?? []).forEach((entry) => {
+      if (entry.id !== this.playerId) speedById.set(entry.id, { speed: entry.pose?.speed ?? 0, impacted: false });
+    });
+    for (const [id, visual] of this.remoteGroups ?? []) {
+      if (!visual.group.visible) continue;
+      const info = speedById.get(id);
+      if (info?.impacted) continue;
+      this.animateCharacter(visual.parts, Math.abs(info?.speed ?? 0), 0.6 + (visual.slot ?? 0) * 0.3);
     }
     for (const trophy of this.trophiesWorld) {
       if (trophy.collected || !trophy.sprite || !trophy.priceSprite) continue;
       const nearPlayer = Math.hypot(trophy.x - this.player.x, trophy.z - this.player.z) < 3.2;
-      const nearBot = this.bot && Math.hypot(trophy.x - this.bot.x, trophy.z - this.bot.z) < 3.2;
+      const nearBot = this.activeBotList().some((bot) => Math.hypot(trophy.x - bot.x, trophy.z - bot.z) < 3.2);
       const near = nearPlayer || nearBot;
       trophy.priceSprite.visible = near;
       trophy.sprite.position.y = 1.35 + Math.sin(this.time * 3 + trophy.z) * 0.12;
@@ -2382,7 +2513,7 @@ export class WaveRunnersGame {
     this.updateInput(dt);
     const wasLocalImpacted = this.isRunnerImpacted(this.player);
     this.updateImpact(dt);
-    this.generateChunksAround(this.player.z, this.bot?.z ?? this.player.z);
+    this.generateChunksAround(this.player.z, this.frontRunnerZ());
     this.updateTrophyRespawns();
     if (!wasLocalImpacted && !this.isRunnerImpacted(this.player)) {
       this.updatePhysics(dt);
@@ -2390,7 +2521,7 @@ export class WaveRunnersGame {
       this.updateCollecting(dt);
       this.updatePlayerBumpAction();
     }
-    this.updateBot(dt);
+    this.updateBots(dt);
     this.sendNetworkInput();
     this.updateNetworkHost(dt);
     if (!this.impactState) this.updateWaves(dt);

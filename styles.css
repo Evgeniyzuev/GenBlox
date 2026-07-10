@@ -1173,6 +1173,33 @@ button.durak-card:disabled { opacity: .45; }
   font-weight: 900;
   text-align: center;
 }
+.wave-player-count {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.wave-player-count span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 2px;
+}
+.wave-goal-choice .wave-player-count button {
+  min-width: 42px;
+  min-height: 38px;
+  border: 1px solid rgba(255,255,255,.18);
+  color: var(--ink);
+  background: rgba(15,18,36,.72);
+  cursor: pointer;
+  font-weight: 900;
+}
+.wave-goal-choice .wave-player-count button.is-selected {
+  color: #171525;
+  background: var(--cyan);
+}
 .wave-goal-choice button {
   min-height: 48px;
   border: 1px solid rgba(255,255,255,.18);

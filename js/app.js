@@ -668,9 +668,9 @@ function syncRoom() {
       return;
     }
     if (activeGameId === "wave-runners") {
-      if (client.playerIndex > 1) {
+      if (client.playerIndex > 5) {
         destroyRealtimeGames();
-        showRealtimeUnavailable(elements.waveStage, "Spectating", "Wave Runners supports two active runners in this version.");
+        showRealtimeUnavailable(elements.waveStage, "Spectating", "Wave Runners supports six active runners in this version.");
         elements.waveStatus.textContent = "Spectating Wave Runners";
         return;
       }
@@ -680,12 +680,12 @@ function syncRoom() {
         wormsGame = null;
         microGame = null;
         waveGame = new WaveRunnersGame(elements.waveStage, {
-          bot: false,
+          bot: client.isHost,
           onStatus: (message) => { elements.waveStatus.textContent = message; },
           network: {
             role: client.isHost ? "host" : "guest",
             playerId: client.playerId,
-            getPlayers: () => client.players.slice(0, 2).map((player, index) => ({
+            getPlayers: () => client.players.slice(0, 6).map((player, index) => ({
               id: player.id,
               name: index === 0 ? "Host" : `Player ${index + 1}`,
             })),
@@ -734,6 +734,16 @@ function setupRoomLabels() {
     elements.nameO.textContent = "Card table";
     elements.newRound.hidden = !client.isHost;
     elements.hint.textContent = "Durak uses four seats. Empty seats are controlled by bots.";
+    return;
+  }
+  if (activeGameId === "wave-runners") {
+    const activePlayers = Math.min(client.playerCount, 6);
+    elements.role.textContent = client.playerIndex > 5 ? "Spectating" : (client.isHost ? "Run host" : `Runner ${client.playerIndex + 1}`);
+    elements.players.textContent = `Players: ${activePlayers} / 6`;
+    elements.nameX.textContent = "Runners";
+    elements.nameO.textContent = "Bots fill empty slots";
+    elements.newRound.hidden = true;
+    elements.hint.textContent = "Choose 2-6 runners at the start. Connected players take slots first; the host fills the rest with bots.";
     return;
   }
   const side = roomPlayerSide();
