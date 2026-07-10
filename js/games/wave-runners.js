@@ -23,6 +23,7 @@ const MAX_GREEN_SURFACE_RUN = 68;
 const GREEN_SAFETY_MARGIN = 1.2;
 const BASE_COLLECT_RATE = 76;
 const COLLECT_RADIUS = 2.175;
+const SOUND_STORAGE_KEY = "genblox:wave-runners-muted";
 const MATCH_TARGETS = [20000, 50000, 100000];
 const MAX_ACTIVE_TROPHIES = 180;
 const TROPHY_RESPAWN_INTERVAL = 30;
@@ -164,6 +165,13 @@ export class WaveRunnersGame {
     this.wasActionPressed = false;
     this.collecting = null;
     this.deathFlash = 0;
+    this.impactState = null;
+    this.victoryShown = false;
+    this.victoryConfetti = [];
+    this.muted = localStorage.getItem(SOUND_STORAGE_KEY) === "1";
+    this.audio = null;
+    this.audioReady = false;
+    this.ambience = null;
     this.chunkLength = 34;
     this.trackWidth = 34;
     this.chunks = new Map();
@@ -232,6 +240,7 @@ export class WaveRunnersGame {
       <div class="wave-stat is-value"><strong data-wave-money>$0</strong></div>
       <div class="wave-stat"><small>S</small><strong data-wave-speed>8.7</strong></div>
       <div class="wave-stat"><small>T</small><strong data-wave-take-rate>$76/s</strong></div>
+      <button class="wave-sound-toggle" data-wave-sound type="button" aria-label="Toggle sound">SOUND</button>
       <div class="wave-rank"><strong data-wave-ranking>-</strong></div>
       <div class="wave-collect" data-wave-collect hidden><span></span></div>
       <div class="wave-controls">W/S move, A/D turn, Space jumps, E harvests. On phone use the stick and right buttons.</div>
@@ -247,20 +256,37 @@ export class WaveRunnersGame {
     `;
     this.overlay = document.createElement("div");
     this.overlay.className = "wave-reset";
+    this.victoryOverlay = document.createElement("div");
+    this.victoryOverlay.className = "wave-victory";
+    this.victoryOverlay.hidden = true;
+    this.victoryOverlay.innerHTML = `
+      <div class="wave-victory-burst" aria-hidden="true"></div>
+      <div class="wave-victory-copy">
+        <small>WINNER</small>
+        <strong data-wave-victory-name>-</strong>
+        <span data-wave-victory-score>$0</span>
+        <button data-wave-play-again type="button">NEW RUN</button>
+      </div>
+    `;
     this.goalChoice = document.createElement("div");
     this.goalChoice.className = "wave-goal-choice";
-    this.root.append(this.canvasHost, this.hud, this.touchControls, this.goalChoice, this.overlay);
+    this.root.append(this.canvasHost, this.hud, this.touchControls, this.goalChoice, this.overlay, this.victoryOverlay);
     this.distanceEl = this.hud.querySelector("[data-wave-distance]");
     this.moneyEl = this.hud.querySelector("[data-wave-money]");
     this.speedEl = this.hud.querySelector("[data-wave-speed]");
     this.takeRateEl = this.hud.querySelector("[data-wave-take-rate]");
     this.rankingEl = this.hud.querySelector("[data-wave-ranking]");
+    this.soundButton = this.hud.querySelector("[data-wave-sound]");
     this.collectEl = this.hud.querySelector("[data-wave-collect]");
     this.collectBar = this.collectEl.querySelector("span");
+    this.victoryNameEl = this.victoryOverlay.querySelector("[data-wave-victory-name]");
+    this.victoryScoreEl = this.victoryOverlay.querySelector("[data-wave-victory-score]");
+    this.playAgainButton = this.victoryOverlay.querySelector("[data-wave-play-again]");
     this.stickEl = this.touchControls.querySelector("[data-wave-stick]");
     this.stickKnob = this.stickEl.querySelector("span");
     this.jumpButton = this.touchControls.querySelector("[data-wave-jump]");
     this.actionButton = this.touchControls.querySelector("[data-wave-action]");
+    this.refreshSoundButton();
   }
 
   buildScene() {
@@ -302,6 +328,14 @@ export class WaveRunnersGame {
       playerSkin: new THREE.MeshStandardMaterial({ color: 0xf0c18f, roughness: 0.7 }),
       playerHair: new THREE.MeshStandardMaterial({ color: 0x2b1f27, roughness: 0.75 }),
       remoteHair: new THREE.MeshStandardMaterial({ color: 0x412f18, roughness: 0.75 }),
+      playerPants: new THREE.MeshStandardMaterial({ color: 0x171525, roughness: 0.72 }),
+      playerVest: new THREE.MeshStandardMaterial({ color: 0x2e3440, roughness: 0.72 }),
+      playerBoot: new THREE.MeshStandardMaterial({ color: 0xd77c2d, roughness: 0.62 }),
+      playerSole: new THREE.MeshStandardMaterial({ color: 0x10121b, roughness: 0.76 }),
+      playerGlove: new THREE.MeshStandardMaterial({ color: 0x11131d, roughness: 0.68 }),
+      face: new THREE.MeshStandardMaterial({ color: 0x141019, roughness: 0.55 }),
+      mouth: new THREE.MeshStandardMaterial({ color: 0x6f2630, roughness: 0.58 }),
+      trim: new THREE.MeshStandardMaterial({ color: 0xffd36a, roughness: 0.58 }),
       trophy: new THREE.MeshStandardMaterial({ color: 0xffd54f, emissive: 0x806000, emissiveIntensity: 0.45, roughness: 0.35 }),
     };
 
@@ -340,24 +374,91 @@ export class WaveRunnersGame {
     const bodyMaterial = materials.body ?? this.materials.playerBody;
     const skinMaterial = materials.skin ?? this.materials.playerSkin;
     const hairMaterial = materials.hair ?? this.materials.playerHair;
-    const makePart = (name, size, position, material) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), material);
+    const pantsMaterial = materials.pants ?? this.materials.playerPants;
+    const vestMaterial = materials.vest ?? this.materials.playerVest;
+    const bootMaterial = materials.boot ?? this.materials.playerBoot;
+    const soleMaterial = materials.sole ?? this.materials.playerSole;
+    const gloveMaterial = materials.glove ?? this.materials.playerGlove;
+    const makeMesh = (geometry, material, position, parent = group, name = "") => {
+      const mesh = new THREE.Mesh(geometry, material);
       mesh.name = name;
       mesh.position.copy(position);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      group.add(mesh);
+      parent.add(mesh);
       return mesh;
     };
-    const parts = {
-      torso: makePart("torso", new THREE.Vector3(0.9, 1.1, 0.45), new THREE.Vector3(0, 0.45, 0), bodyMaterial),
-      head: makePart("head", new THREE.Vector3(0.68, 0.68, 0.68), new THREE.Vector3(0, 1.35, 0), skinMaterial),
-      hair: makePart("hair", new THREE.Vector3(0.74, 0.22, 0.74), new THREE.Vector3(0, 1.78, 0), hairMaterial),
-      leftArm: makePart("leftArm", new THREE.Vector3(0.28, 0.95, 0.3), new THREE.Vector3(-0.72, 0.42, 0), skinMaterial),
-      rightArm: makePart("rightArm", new THREE.Vector3(0.28, 0.95, 0.3), new THREE.Vector3(0.72, 0.42, 0), skinMaterial),
-      leftLeg: makePart("leftLeg", new THREE.Vector3(0.32, 0.95, 0.34), new THREE.Vector3(-0.25, -0.6, 0), bodyMaterial),
-      rightLeg: makePart("rightLeg", new THREE.Vector3(0.32, 0.95, 0.34), new THREE.Vector3(0.25, -0.6, 0), bodyMaterial),
+    const box = (size) => new THREE.BoxGeometry(size.x, size.y, size.z);
+    const sphere = (radius, width = 16, height = 10) => new THREE.SphereGeometry(radius, width, height);
+    const cylinder = (radiusTop, radiusBottom, height, radial = 16) => new THREE.CylinderGeometry(radiusTop, radiusBottom, height, radial);
+
+    const torso = new THREE.Group();
+    torso.position.set(0, 0.42, 0);
+    group.add(torso);
+    makeMesh(box(new THREE.Vector3(0.98, 1.06, 0.48)), bodyMaterial, new THREE.Vector3(0, 0, 0), torso, "hoodie");
+    makeMesh(box(new THREE.Vector3(1.08, 1.0, 0.12)), vestMaterial, new THREE.Vector3(0, 0.03, -0.31), torso, "vest-back");
+    makeMesh(box(new THREE.Vector3(0.25, 1.0, 0.16)), vestMaterial, new THREE.Vector3(-0.35, 0.03, -0.35), torso, "vest-left");
+    makeMesh(box(new THREE.Vector3(0.25, 1.0, 0.16)), vestMaterial, new THREE.Vector3(0.35, 0.03, -0.35), torso, "vest-right");
+    makeMesh(cylinder(0.06, 0.06, 0.52, 10), this.materials.trim, new THREE.Vector3(0, -0.6, -0.32), torso, "zipper").rotation.x = Math.PI / 2;
+    makeMesh(cylinder(0.08, 0.08, 0.08, 12), this.materials.face, new THREE.Vector3(0, -0.84, -0.31), torso, "zipper-pull");
+
+    const neck = makeMesh(cylinder(0.18, 0.2, 0.18, 16), skinMaterial, new THREE.Vector3(0, 1.03, 0), group, "neck");
+    neck.scale.z = 0.82;
+
+    const head = new THREE.Group();
+    head.position.set(0, 1.36, 0);
+    group.add(head);
+    makeMesh(box(new THREE.Vector3(0.72, 0.7, 0.66)), skinMaterial, new THREE.Vector3(0, 0, 0), head, "head-block");
+    makeMesh(sphere(0.08, 12, 8), this.materials.face, new THREE.Vector3(-0.18, 0.06, -0.36), head, "eye-left").scale.y = 1.45;
+    makeMesh(sphere(0.08, 12, 8), this.materials.face, new THREE.Vector3(0.18, 0.06, -0.36), head, "eye-right").scale.y = 1.45;
+    makeMesh(box(new THREE.Vector3(0.22, 0.035, 0.035)), this.materials.mouth, new THREE.Vector3(0, -0.18, -0.37), head, "mouth");
+
+    const hairCap = makeMesh(box(new THREE.Vector3(0.78, 0.22, 0.72)), hairMaterial, new THREE.Vector3(0, 0.42, 0.01), head, "hair-cap");
+    hairCap.rotation.x = -0.08;
+    [
+      [-0.25, 0.41, -0.28, -0.6, 0.2],
+      [-0.05, 0.48, -0.32, -0.28, 0.04],
+      [0.2, 0.4, -0.29, -0.8, -0.18],
+      [0.39, 0.16, -0.05, -0.08, -0.55],
+      [-0.43, 0.13, -0.04, 0.08, 0.5],
+    ].forEach(([x, y, z, rx, rz], index) => {
+      const lock = makeMesh(box(new THREE.Vector3(0.18, 0.52 - index * 0.035, 0.16)), hairMaterial, new THREE.Vector3(x, y, z), head, `hair-lock-${index}`);
+      lock.rotation.x = rx;
+      lock.rotation.z = rz;
+    });
+
+    const makeArm = (side) => {
+      const arm = new THREE.Group();
+      arm.position.set(side * 0.67, 0.82, 0);
+      group.add(arm);
+      makeMesh(sphere(0.18, 14, 8), bodyMaterial, new THREE.Vector3(0, 0.04, 0), arm, `${side < 0 ? "left" : "right"}-shoulder`).scale.set(1, 0.72, 0.9);
+      makeMesh(box(new THREE.Vector3(0.3, 0.48, 0.3)), skinMaterial, new THREE.Vector3(0, -0.31, 0), arm, "upper-arm");
+      makeMesh(box(new THREE.Vector3(0.32, 0.18, 0.32)), side < 0 ? gloveMaterial : bodyMaterial, new THREE.Vector3(0, -0.66, 0), arm, "wrist");
+      makeMesh(sphere(0.18, 14, 10), side < 0 ? gloveMaterial : skinMaterial, new THREE.Vector3(0, -0.86, -0.02), arm, "hand").scale.set(0.85, 1.05, 0.78);
+      return arm;
     };
+
+    const makeLeg = (side) => {
+      const leg = new THREE.Group();
+      leg.position.set(side * 0.26, -0.12, 0);
+      group.add(leg);
+      makeMesh(box(new THREE.Vector3(0.34, 0.82, 0.34)), pantsMaterial, new THREE.Vector3(0, -0.48, 0), leg, "pants");
+      makeMesh(box(new THREE.Vector3(0.42, 0.22, 0.42)), bootMaterial, new THREE.Vector3(0, -0.98, -0.02), leg, "boot-top");
+      makeMesh(box(new THREE.Vector3(0.46, 0.18, 0.66)), soleMaterial, new THREE.Vector3(0, -1.12, -0.12), leg, "boot-sole");
+      makeMesh(cylinder(0.05, 0.05, 0.12, 10), this.materials.trim, new THREE.Vector3(side * 0.08, -0.95, -0.36), leg, "lace").rotation.x = Math.PI / 2;
+      return leg;
+    };
+
+    const parts = {
+      torso,
+      head,
+      hair: hairCap,
+      leftArm: makeArm(-1),
+      rightArm: makeArm(1),
+      leftLeg: makeLeg(-1),
+      rightLeg: makeLeg(1),
+    };
+    group.scale.setScalar(1.08);
     group.userData.parts = parts;
     return group;
   }
@@ -491,13 +592,59 @@ export class WaveRunnersGame {
   }
 
   startMatch(targetScore = MATCH_TARGETS[0], mapId = this.selectedMap.id, publish = true) {
+    this.initAudio();
+    this.resetRunState();
     this.applyMap(mapId);
     this.targetScore = targetScore;
     this.phase = "playing";
     this.winner = null;
+    this.victoryShown = false;
+    this.impactState = null;
+    this.victoryOverlay.hidden = true;
     this.goalChoice.hidden = true;
     this.callbacks.onStatus?.(`${this.selectedMap.title}: first to $${targetScore.toLocaleString("en-US")} wins.`);
     if (publish && this.networkRole === "host") this.publishSnapshot(true);
+  }
+
+  resetRunState() {
+    this.money = 0;
+    this.trophies = 0;
+    this.lootValue = 0;
+    this.totalScore = 0;
+    this.distance = 0;
+    this.player.x = 0;
+    this.player.y = 1.55;
+    this.player.z = 5;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    this.player.speed = 0;
+    this.player.angle = 0;
+    this.player.grounded = true;
+    this.player.inTrench = false;
+    this.playerGroup.rotation.x = 0;
+    this.playerGroup.rotation.z = 0;
+    this.collecting = null;
+    this.claimedTrophyIds.clear();
+    this.pendingClaimId = null;
+    this.disposeObject3D(this.houseTrophyGroup);
+    this.houseTrophyGroup.clear();
+    if (this.bot) {
+      this.bot.score = 0;
+      this.bot.money = 0;
+      this.bot.x = 3.8;
+      this.bot.y = 1.55;
+      this.bot.z = 5;
+      this.bot.angle = 0;
+      this.bot.speed = 0;
+      this.bot.targetX = 3.8;
+      this.bot.targetZ = 18;
+      this.bot.targetTrophy = null;
+      this.bot.targetTrench = null;
+      this.bot.collecting = null;
+      this.bot.collectValue = 0;
+      this.setBotState(BOT_STATES.RUNNING);
+    }
+    this.resetWorldGeometry();
   }
 
   applyMap(mapId) {
@@ -583,6 +730,7 @@ export class WaveRunnersGame {
 
   bindEvents() {
     this.onKeyDown = (event) => {
+      this.initAudio();
       const key = event.key.toLowerCase();
       this.keys.add(key);
       if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(key)) event.preventDefault();
@@ -594,6 +742,7 @@ export class WaveRunnersGame {
     this.onPointerMove = (event) => this.pointerMove(event);
     this.onPointerUp = (event) => this.pointerUp(event);
     this.onJumpDown = (event) => {
+      this.initAudio();
       event.preventDefault();
       this.mobileInput.jump = true;
       this.jump();
@@ -603,6 +752,7 @@ export class WaveRunnersGame {
       this.mobileInput.jump = false;
     };
     this.onActionDown = (event) => {
+      this.initAudio();
       event.preventDefault();
       this.mobileInput.action = true;
     };
@@ -610,10 +760,31 @@ export class WaveRunnersGame {
       event.preventDefault();
       this.mobileInput.action = false;
     };
+    this.onSoundToggle = (event) => {
+      event.preventDefault();
+      this.initAudio();
+      this.setMuted(!this.muted);
+    };
+    this.onPlayAgain = (event) => {
+      event.preventDefault();
+      if (this.networkRole === "guest") {
+        this.callbacks.onStatus?.("Waiting for the host to start a new run.");
+        return;
+      }
+      this.victoryOverlay.hidden = true;
+      this.goalChoice.hidden = false;
+      this.phase = "selecting";
+      this.winner = null;
+      this.victoryShown = false;
+      this.callbacks.onStatus?.("Choose the target score.");
+      if (this.networkRole === "host") this.publishSnapshot(true);
+    };
     window.addEventListener("keydown", this.onKeyDown, { passive: false });
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("resize", this.onResize);
     window.visualViewport?.addEventListener("resize", this.onResize);
+    this.soundButton.addEventListener("click", this.onSoundToggle);
+    this.playAgainButton.addEventListener("click", this.onPlayAgain);
     this.stickEl.addEventListener("pointerdown", this.onPointerDown);
     this.stickEl.addEventListener("pointermove", this.onPointerMove);
     this.stickEl.addEventListener("pointerup", this.onPointerUp);
@@ -624,6 +795,120 @@ export class WaveRunnersGame {
     this.actionButton.addEventListener("pointerdown", this.onActionDown);
     this.actionButton.addEventListener("pointerup", this.onActionUp);
     this.actionButton.addEventListener("pointercancel", this.onActionUp);
+  }
+
+  initAudio() {
+    if (this.audioReady || this.muted) return;
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    if (!this.audio) {
+      const context = new AudioContext();
+      const master = context.createGain();
+      master.gain.value = 0.22;
+      master.connect(context.destination);
+      this.audio = { context, master };
+    }
+    this.audio.context.resume?.();
+    this.audioReady = true;
+    this.startAmbience();
+  }
+
+  setMuted(muted) {
+    this.muted = muted;
+    localStorage.setItem(SOUND_STORAGE_KEY, muted ? "1" : "0");
+    if (this.audio?.master) this.audio.master.gain.setTargetAtTime(muted ? 0 : 0.22, this.audio.context.currentTime, 0.02);
+    if (!muted) this.initAudio();
+    this.refreshSoundButton();
+  }
+
+  refreshSoundButton() {
+    if (!this.soundButton) return;
+    this.soundButton.textContent = this.muted ? "MUTED" : "SOUND";
+    this.soundButton.classList.toggle("is-muted", this.muted);
+  }
+
+  startAmbience() {
+    if (!this.audio || this.ambience || this.muted) return;
+    const { context, master } = this.audio;
+    const gain = context.createGain();
+    const oscillator = context.createOscillator();
+    oscillator.type = "sine";
+    oscillator.frequency.value = 88;
+    gain.gain.value = 0.018;
+    oscillator.connect(gain);
+    gain.connect(master);
+    oscillator.start();
+    this.ambience = { oscillator, gain };
+  }
+
+  playTone({ frequency = 440, endFrequency = frequency, duration = 0.18, type = "sine", volume = 0.16, delay = 0 }) {
+    if (this.muted) return;
+    this.initAudio();
+    if (!this.audioReady || !this.audio) return;
+    const { context, master } = this.audio;
+    const now = context.currentTime + delay;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, now);
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(20, endFrequency), now + duration);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(volume, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    oscillator.connect(gain);
+    gain.connect(master);
+    oscillator.start(now);
+    oscillator.stop(now + duration + 0.02);
+  }
+
+  playSound(name) {
+    const sounds = {
+      jump: () => this.playTone({ frequency: 280, endFrequency: 620, duration: 0.14, type: "triangle", volume: 0.12 }),
+      collect: () => {
+        this.playTone({ frequency: 660, endFrequency: 990, duration: 0.09, type: "square", volume: 0.08 });
+        this.playTone({ frequency: 990, endFrequency: 1320, duration: 0.1, type: "triangle", volume: 0.07, delay: 0.06 });
+      },
+      upgrade: () => {
+        [360, 540, 720].forEach((frequency, index) => this.playTone({ frequency, endFrequency: frequency * 1.12, duration: 0.12, type: "triangle", volume: 0.08, delay: index * 0.07 }));
+      },
+      wave: () => this.playTone({ frequency: 120, endFrequency: 56, duration: 0.55, type: "sawtooth", volume: 0.08 }),
+      pass: () => this.playTone({ frequency: 340, endFrequency: 190, duration: 0.18, type: "sine", volume: 0.08 }),
+      hit: () => {
+        this.playTone({ frequency: 90, endFrequency: 32, duration: 0.42, type: "sawtooth", volume: 0.2 });
+        this.playTone({ frequency: 240, endFrequency: 80, duration: 0.28, type: "square", volume: 0.08 });
+      },
+      respawn: () => this.playTone({ frequency: 190, endFrequency: 520, duration: 0.22, type: "triangle", volume: 0.1 }),
+      victory: () => [523, 659, 784, 1046].forEach((frequency, index) => this.playTone({ frequency, endFrequency: frequency * 1.02, duration: 0.2, type: "triangle", volume: 0.12, delay: index * 0.11 })),
+    };
+    sounds[name]?.();
+  }
+
+  showVictory(winnerName = this.winner, winnerScore = null) {
+    if (!winnerName || this.victoryShown) return;
+    this.victoryShown = true;
+    const score = winnerScore ?? this.rankingEntries().find((entry) => entry.name === winnerName)?.score ?? this.targetScore;
+    this.victoryNameEl.textContent = `${winnerName} WINS!`;
+    this.victoryScoreEl.textContent = `$${Math.floor(score).toLocaleString("en-US")}`;
+    this.playAgainButton.disabled = this.networkRole === "guest";
+    this.playAgainButton.textContent = this.networkRole === "guest" ? "WAIT FOR HOST" : "NEW RUN";
+    this.victoryOverlay.hidden = false;
+    this.spawnVictoryConfetti();
+    this.playSound("victory");
+  }
+
+  spawnVictoryConfetti() {
+    this.victoryOverlay.querySelectorAll(".wave-confetti").forEach((node) => node.remove());
+    const colors = ["#b7f34a", "#63dcff", "#ff668c", "#ffd36a", "#f8f7ff"];
+    for (let index = 0; index < 72; index += 1) {
+      const piece = document.createElement("i");
+      piece.className = "wave-confetti";
+      piece.style.left = `${rand(4, 96)}%`;
+      piece.style.setProperty("--delay", `${rand(0, 0.9).toFixed(2)}s`);
+      piece.style.setProperty("--fall", `${rand(2.0, 3.6).toFixed(2)}s`);
+      piece.style.setProperty("--spin", `${rand(-540, 540).toFixed(0)}deg`);
+      piece.style.background = colors[index % colors.length];
+      this.victoryOverlay.append(piece);
+    }
   }
 
   resize() {
@@ -645,14 +930,16 @@ export class WaveRunnersGame {
   }
 
   jump() {
-    if (!this.player.grounded) return;
+    if (!this.player.grounded || this.impactState) return;
     this.player.vy = this.player.inTrench ? 13.8 : 9.4;
     this.player.grounded = false;
     this.player.state = PLAYER_STATES.JUMPING;
     this.cancelCollect();
+    this.playSound("jump");
   }
 
   pointerDown(event) {
+    this.initAudio();
     event.preventDefault();
     this.stickEl.setPointerCapture(event.pointerId);
     this.mobileInput.active = true;
@@ -953,6 +1240,7 @@ export class WaveRunnersGame {
     this.createWaveMesh(type, frontZ + (waveEvent.lead ?? 150 * this.selectedMap.waveLeadMultiplier), waveEvent.speed, waveEvent.id);
     this.lastWaveEventAt = Math.max(this.lastWaveEventAt, waveEvent.at ?? this.time);
     this.nextWaveIn = this.nextWaveDelay();
+    if (!type.harmless) this.playSound("wave");
   }
 
   createWaveMesh(type, z, speed, id) {
@@ -974,6 +1262,10 @@ export class WaveRunnersGame {
   }
 
   updateInput(dt) {
+    if (this.impactState) {
+      this.player.speed = 0;
+      return;
+    }
     const left = this.keys.has("d") || this.keys.has("arrowright");
     const right = this.keys.has("a") || this.keys.has("arrowleft");
     const forward = this.keys.has("w") || this.keys.has("arrowup");
@@ -1021,6 +1313,7 @@ export class WaveRunnersGame {
   }
 
   updateCollecting(dt) {
+    if (this.impactState) return;
     if (this.collecting?.collected) this.collecting = null;
     const harvest = this.keys.has("e") || this.mobileInput.action;
     if (this.nearbyUpgradeMachine()) return;
@@ -1041,6 +1334,7 @@ export class WaveRunnersGame {
       this.disposeTrophy(trophy);
       this.spawnHouseTrophy(trophy.symbol);
       this.callbacks.onStatus?.(`${trophy.symbol} claimed: +$${trophy.value}.`);
+      this.playSound("collect");
       this.collecting = null;
       this.checkWinner();
     }
@@ -1141,11 +1435,17 @@ export class WaveRunnersGame {
       return;
     }
     if (snapshot.phase === "playing" && this.phase !== "playing") {
+      this.resetRunState();
       this.phase = "playing";
       this.goalChoice.hidden = true;
+      this.victoryOverlay.hidden = true;
+      this.victoryShown = false;
       this.callbacks.onStatus?.(`First to $${this.targetScore.toLocaleString("en-US")} wins.`);
     }
-    if (snapshot.phase === "finished") this.phase = "finished";
+    if (snapshot.phase === "finished") {
+      this.phase = "finished";
+      if (this.winner) this.showVictory(this.winner);
+    }
     (snapshot.claimed ?? []).forEach((id) => this.claimedTrophyIds.add(id));
     if (isFreshSnapshot) {
       this.waveQueue.sync(snapshot.wavePlan ?? [], incomingHostTime || this.time);
@@ -1503,6 +1803,7 @@ export class WaveRunnersGame {
     this.winner = winner.name;
     this.phase = "finished";
     this.callbacks.onStatus?.(`${winner.name} wins at $${Math.floor(winner.score).toLocaleString("en-US")}!`);
+    this.showVictory(winner.name, winner.score);
   }
 
   nearbyUpgradeMachine() {
@@ -1535,6 +1836,7 @@ export class WaveRunnersGame {
     this.speedUpgradeCost = Math.round(this.speedUpgradeCost * 1.32 + 20);
     this.refreshMachineLabel("speed", `SPEED $${this.speedUpgradeCost}`, "#63dcff");
     this.callbacks.onStatus?.(`Speed upgraded: ${this.currentMaxSpeed().toFixed(1)}.`);
+    this.playSound("upgrade");
   }
 
   buyCollectUpgrade() {
@@ -1547,6 +1849,7 @@ export class WaveRunnersGame {
     this.collectUpgradeCost = Math.round(this.collectUpgradeCost * 1.3 + 18);
     this.refreshMachineLabel("collect", `TAKE $${this.collectUpgradeCost}`, "#b7f34a");
     this.callbacks.onStatus?.(`Harvest upgraded: $${this.currentCollectRate()}/s.`);
+    this.playSound("upgrade");
   }
 
   refreshMachineLabel(kind, text, color) {
@@ -1610,10 +1913,12 @@ export class WaveRunnersGame {
       if (wave.box.intersectsBox(playerBox)) {
         if (wave.type.harmless) {
           this.callbacks.onStatus?.("WHITE wave passed. False alarm.");
+          this.playSound("pass");
         } else if (this.player.z < 12) {
           this.callbacks.onStatus?.("Safe at home.");
         } else if (this.player.inTrench && this.player.y < 0.05) {
           this.callbacks.onStatus?.(`${wave.type.label} wave passed overhead.`);
+          this.playSound("pass");
         } else {
           this.die(wave.type.label);
           break;
@@ -1637,10 +1942,82 @@ export class WaveRunnersGame {
     return this.surfaceY(this.bot.x, this.bot.z) < 1 && this.bot.y < 0.05;
   }
 
+  spawnImpactParticles(x, y, z, color = 0xf8f7ff) {
+    for (let index = 0; index < 24; index += 1) {
+      const material = new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.35,
+        transparent: true,
+        opacity: 0.85,
+        roughness: 0.45,
+      });
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(rand(0.06, 0.14), 8, 6), material);
+      mesh.position.set(x + rand(-0.55, 0.55), y + rand(-0.2, 0.7), z + rand(-0.55, 0.55));
+      mesh.userData.velocity = new THREE.Vector3(rand(-5, 5), rand(2.5, 8), rand(-7, -2));
+      mesh.userData.life = rand(0.45, 0.9);
+      this.waveGroup.add(mesh);
+    }
+  }
+
+  updateImpactParticles(dt) {
+    const particles = this.waveGroup.children.filter((child) => child.userData?.velocity);
+    particles.forEach((particle) => {
+      particle.userData.life -= dt;
+      particle.userData.velocity.y -= 16 * dt;
+      particle.position.addScaledVector(particle.userData.velocity, dt);
+      particle.material.opacity = clamp(particle.userData.life, 0, 0.85);
+      if (particle.userData.life > 0) return;
+      this.waveGroup.remove(particle);
+      particle.geometry.dispose();
+      particle.material.dispose();
+    });
+  }
+
+  updateImpact(dt) {
+    this.updateImpactParticles(dt);
+    if (!this.impactState) return;
+    const state = this.impactState;
+    state.elapsed += dt;
+    const progress = clamp(state.elapsed / state.duration, 0, 1);
+    const arc = Math.sin(progress * Math.PI) * state.arc;
+    this.player.x = state.from.x + (state.to.x - state.from.x) * progress;
+    this.player.y = state.from.y + (state.to.y - state.from.y) * progress + arc;
+    this.player.z = state.from.z + (state.to.z - state.from.z) * progress;
+    this.player.angle = state.fromAngle + state.spin * progress;
+    this.playerGroup.rotation.x = progress * Math.PI * 4.5;
+    this.playerGroup.rotation.z = Math.sin(progress * Math.PI * 3) * 0.55;
+    this.deathFlash = Math.max(this.deathFlash, 0.35 * (1 - progress));
+    if (progress < 1) return;
+    this.finishDeathReset();
+  }
+
   die(label) {
+    if (this.impactState) return;
     this.bestDistance = Math.max(this.bestDistance, this.distance);
-    this.callbacks.onStatus?.(`${label} wave hit you. Back to start.`);
+    this.callbacks.onStatus?.(`${label} wave smashed you back to start.`);
     this.deathFlash = 1;
+    this.playSound("hit");
+    this.spawnImpactParticles(this.player.x, this.player.y, this.player.z, waveTypeById(label.toLowerCase()).color);
+    this.impactState = {
+      label,
+      elapsed: 0,
+      duration: 1.05,
+      from: { x: this.player.x, y: this.player.y, z: this.player.z },
+      to: { x: 0, y: 1.55, z: 5 },
+      fromAngle: this.player.angle,
+      spin: Math.PI * (this.player.x < 0 ? -2.8 : 2.8),
+      arc: 9.5,
+    };
+    this.player.speed = 0;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    this.player.grounded = false;
+    this.player.inTrench = false;
+    this.collecting = null;
+  }
+
+  finishDeathReset() {
     this.player.x = 0;
     this.player.y = 1.55;
     this.player.z = 5;
@@ -1650,8 +2027,12 @@ export class WaveRunnersGame {
     this.player.angle = 0;
     this.player.grounded = true;
     this.player.inTrench = false;
+    this.playerGroup.rotation.x = 0;
+    this.playerGroup.rotation.z = 0;
     this.collecting = null;
     this.distance = 0;
+    this.impactState = null;
+    this.playSound("respawn");
     if (!this.bot) {
       for (const wave of this.waves) {
         this.waveGroup.remove(wave.mesh);
@@ -1682,6 +2063,7 @@ export class WaveRunnersGame {
   }
 
   updateAnimation(dt) {
+    if (this.impactState) return;
     this.animateCharacter(this.parts, this.player.grounded ? Math.abs(this.player.speed) : 0, 0);
     if (this.remoteGroup?.visible) {
       const remoteSpeed = this.bot?.speed ?? this.remotePose?.speed ?? 0;
@@ -1712,6 +2094,11 @@ export class WaveRunnersGame {
     this.playerGroup.rotation.y = this.player.angle;
     const behind = new THREE.Vector3(-Math.sin(this.player.angle) * 15, 7.1, -Math.cos(this.player.angle) * 15);
     const target = new THREE.Vector3(this.player.x + behind.x, this.player.y + behind.y, this.player.z + behind.z);
+    if (this.impactState) {
+      const shake = (1 - clamp(this.impactState.elapsed / this.impactState.duration, 0, 1)) * 0.45;
+      target.x += rand(-shake, shake);
+      target.y += rand(-shake, shake);
+    }
     this.camera.position.lerp(target, 1 - Math.exp(-5 * dt));
     this.camera.lookAt(
       this.player.x + Math.sin(this.player.angle) * 14,
@@ -1748,6 +2135,7 @@ export class WaveRunnersGame {
     this.time += dt;
     this.deathFlash = Math.max(0, this.deathFlash - dt * 1.8);
     if (this.phase !== "playing") {
+      this.updateImpactParticles(dt);
       this.updateCamera(dt);
       this.updateRemoteVisual(dt);
       this.updateHud();
@@ -1758,15 +2146,19 @@ export class WaveRunnersGame {
       return;
     }
     this.updateInput(dt);
-    this.updatePhysics(dt);
-    this.generateChunksAround(this.player.z, this.bot?.z ?? this.player.z);
-    this.updateTrophyRespawns();
-    this.updateBaseInteraction();
-    this.updateCollecting(dt);
-    this.updateBot(dt);
+    const wasImpacted = Boolean(this.impactState);
+    this.updateImpact(dt);
+    if (!wasImpacted && !this.impactState) {
+      this.updatePhysics(dt);
+      this.generateChunksAround(this.player.z, this.bot?.z ?? this.player.z);
+      this.updateTrophyRespawns();
+      this.updateBaseInteraction();
+      this.updateCollecting(dt);
+      this.updateBot(dt);
+    }
     this.sendNetworkInput();
     this.updateNetworkHost(dt);
-    this.updateWaves(dt);
+    if (!this.impactState) this.updateWaves(dt);
     this.updateRemoteVisual(dt);
     this.updateAnimation(dt);
     this.updateCamera(dt);
@@ -1782,6 +2174,8 @@ export class WaveRunnersGame {
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("resize", this.onResize);
     window.visualViewport?.removeEventListener("resize", this.onResize);
+    this.soundButton.removeEventListener("click", this.onSoundToggle);
+    this.playAgainButton.removeEventListener("click", this.onPlayAgain);
     this.stickEl.removeEventListener("pointerdown", this.onPointerDown);
     this.stickEl.removeEventListener("pointermove", this.onPointerMove);
     this.stickEl.removeEventListener("pointerup", this.onPointerUp);
@@ -1796,6 +2190,8 @@ export class WaveRunnersGame {
     this.disposeObject3D(this.scene);
     this.trophiesWorld = [];
     this.trophyStock.clear();
+    this.ambience?.oscillator.stop();
+    this.audio?.context.close?.();
     this.renderer?.dispose();
     this.renderer?.forceContextLoss?.();
     this.root.replaceChildren();
