@@ -154,9 +154,9 @@ function throwerCandidates(game, from) {
 
 function afterSuccessfulDefense(game, defenderIndex) {
   if (game.table.length >= attackLimit(game)) return completeDefense(game);
-  const attackerCanThrow = legalAttackCards(game, game.attacker).length > 0;
+  const attackerHasCards = (game.players[game.attacker]?.hand.length ?? 0) > 0;
   if (!game.options.throwIn) {
-    return attackerCanThrow
+    return attackerHasCards
       ? {
           ...game,
           turn: game.attacker,
@@ -164,14 +164,14 @@ function afterSuccessfulDefense(game, defenderIndex) {
       : completeDefense(game);
   }
 
-  const withEmptyAttackerSkipped = attackerCanThrow || game.passedThrowers.includes(game.attacker)
+  const withEmptyAttackerSkipped = attackerHasCards || game.passedThrowers.includes(game.attacker)
     ? game
     : {
         ...game,
         passedThrowers: [...new Set([...(game.passedThrowers ?? []), game.attacker])],
       };
 
-  if (attackerCanThrow && !withEmptyAttackerSkipped.passedThrowers.includes(game.attacker)) {
+  if (attackerHasCards && !withEmptyAttackerSkipped.passedThrowers.includes(game.attacker)) {
     return {
       ...withEmptyAttackerSkipped,
       turn: game.attacker,

@@ -17,8 +17,8 @@
       src="https://unpkg.com/qrcodejs@1.0.0/qrcode.min.js"
       crossorigin="anonymous"
     ></script>
-    <script type="module" crossorigin src="/assets/index-Br04Qs10.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DGIyjWke.css">
+    <script type="module" crossorigin src="/assets/index-B2gZDL3C.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Cqu9BUHc.css">
   </head>
   <body>
     <header class="topbar">
@@ -196,6 +196,30 @@
             </div>
           </article>
 
+          <article class="space-card fantasy-card">
+            <div class="card-preview fantasy-preview" aria-hidden="true">
+              <div class="fantasy-preview-map">
+                <span></span><span></span><span></span>
+                <i></i><i></i><i></i>
+                <b></b><b></b>
+              </div>
+            </div>
+            <div class="card-copy">
+              <p class="eyebrow">SPACE 006</p>
+              <h2>Fantasy Lanes</h2>
+              <p>A real-time fantasy strategy duel with three lanes, fog of war, counters, towers, upgrades, and center resource springs.</p>
+              <div class="card-actions">
+                <button class="secondary-button play-solo" data-game="fantasy-lanes" type="button">
+                  Play vs Bot
+                </button>
+                <button class="primary-button launch-for-room" data-game="fantasy-lanes" type="button" hidden>
+                  Launch Duel
+                </button>
+              </div>
+              <small class="card-hint">Rooms support two commanders; empty enemy seats are filled by a bot.</small>
+            </div>
+          </article>
+
           <article class="space-card five-card">
             <div class="card-preview five-preview" aria-hidden="true">
               <div class="five-preview-board">
@@ -204,7 +228,7 @@
               </div>
             </div>
             <div class="card-copy">
-              <p class="eyebrow">SPACE 006</p>
+              <p class="eyebrow">SPACE 007</p>
               <h2>Five in a Row</h2>
               <p>A 15 x 15 connection duel: place stones and be first to make an unbroken line of five.</p>
               <div class="card-actions">
@@ -225,7 +249,7 @@
               </div>
             </div>
             <div class="card-copy">
-              <p class="eyebrow">SPACE 007</p>
+              <p class="eyebrow">SPACE 008</p>
               <h2>Reversi</h2>
               <p>Trap, flip, and control the board in a compact strategy classic for two players.</p>
               <div class="card-actions">
@@ -246,7 +270,7 @@
               </div>
             </div>
             <div class="card-copy">
-              <p class="eyebrow">SPACE 008</p>
+              <p class="eyebrow">SPACE 009</p>
               <h2>Durak</h2>
               <p>A four-seat 36-card attack-and-defense table with trump, bito, take, and bots for empty seats.</p>
               <div class="card-actions">
@@ -401,6 +425,11 @@
         <section id="wave-game-view" hidden>
           <p class="game-status wave-status" id="wave-status" aria-live="polite">Run, loot, and hide from waves</p>
           <div class="wave-stage" id="wave-stage"></div>
+        </section>
+
+        <section id="fantasy-game-view" hidden>
+          <p class="game-status fantasy-status" id="fantasy-status" aria-live="polite">Train troops and break the enemy base</p>
+          <div class="fantasy-stage" id="fantasy-stage"></div>
         </section>
       </div>
     </dialog>

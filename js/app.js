@@ -46,6 +46,7 @@ import {
 import { WormsGame } from "./games/worms.js";
 import { MicroMachinesGame } from "./games/micromachines.js";
 import { WaveRunnersGame } from "./games/wave-runners.js";
+import { FantasyLanesGame } from "./games/fantasy-lanes.js";
 
 const GAMES = {
   "tic-tac-toe": {
@@ -121,9 +122,28 @@ const GAMES = {
         <li>Green waves are slow, yellow waves are faster, and red waves are the most dangerous. Trenches keep you safe.</li>
       </ul>`,
   },
+  "fantasy-lanes": {
+    title: "Fantasy Lanes",
+    kicker: "SPACE 006 - REALTIME RTS",
+    help: `
+      <h3>Goal</h3>
+      <p>Destroy the enemy base across three lanes. In a room, two humans can duel; empty enemy seats are controlled by a bot.</p>
+      <h3>Core Rules</h3>
+      <ul>
+        <li>Train Guards, Rangers, Mages, Scouts, and Rams, then send them to lanes 1-3.</li>
+        <li>Guards counter Rangers, Rangers counter Mages, and Mages counter Guards.</li>
+        <li>Towers outrange Rangers. Rangers are for troop control and deal poor damage to buildings; Rams are the main siege threat.</li>
+        <li>The whole battlefield is visible, so lane pressure and army counters are readable at a glance.</li>
+        <li>Gold has a cap, like an elixir bar: spending at the right moment matters more than hoarding forever.</li>
+        <li>Center springs on each lane add income while held, creating snowball pressure.</li>
+        <li>Behind players receive small income and defensive bonuses, so counterattacks remain realistic.</li>
+      </ul>
+      <h3>Controls</h3>
+      <p>Q/W/E/R/T select unit, 1/2/3 sends it to a lane. A/S/D/F buy upgrades. You can also use the on-screen buttons or click a lane.</p>`,
+  },
   "five-in-row": {
     title: "Five in a Row",
-    kicker: "SPACE 006",
+    kicker: "SPACE 007",
     help: `
       <h3>Goal</h3>
       <p>Place five stones in one continuous horizontal, vertical, or diagonal line on a 15 x 15 board.</p>
@@ -136,7 +156,7 @@ const GAMES = {
   },
   reversi: {
     title: "Reversi",
-    kicker: "SPACE 007",
+    kicker: "SPACE 008",
     help: `
       <h3>Goal</h3>
       <p>Finish the game with more discs than your opponent.</p>
@@ -149,7 +169,7 @@ const GAMES = {
   },
   durak: {
     title: "Durak",
-    kicker: "SPACE 008 - 4 PLAYERS",
+    kicker: "SPACE 009 - 4 PLAYERS",
     help: `
       <h3>Goal</h3>
       <p>Get rid of all your cards. The last player holding cards is the durak.</p>
@@ -213,13 +233,16 @@ const elements = {
   wormsStage: $("#worms-stage"),
   microStage: $("#micro-stage"),
   waveStage: $("#wave-stage"),
+  fantasyStage: $("#fantasy-stage"),
   classicGameView: $("#classic-game-view"),
   wormsGameView: $("#worms-game-view"),
   microGameView: $("#micro-game-view"),
   waveGameView: $("#wave-game-view"),
+  fantasyGameView: $("#fantasy-game-view"),
   wormsStatus: $("#worms-status"),
   microStatus: $("#micro-status"),
   waveStatus: $("#wave-status"),
+  fantasyStatus: $("#fantasy-status"),
   gameStatus: $("#game-status"),
   role: $("#role-label"),
   players: $("#players-label"),
@@ -253,6 +276,7 @@ let suppressGameReturn = false;
 let wormsGame = null;
 let microGame = null;
 let waveGame = null;
+let fantasyGame = null;
 let playerProfile = loadPlayerProfile();
 let lastPublishedProfile = "";
 let pendingDurakOptions = null;
@@ -390,7 +414,7 @@ function attachRoomSeats(game, previous = null, gameId = activeGameId) {
 }
 
 function isRealtimeGame(gameId) {
-  return gameId === "worms" || gameId === "micromachines" || gameId === "wave-runners";
+  return gameId === "worms" || gameId === "micromachines" || gameId === "wave-runners" || gameId === "fantasy-lanes";
 }
 
 function destroyRealtimeGames() {
@@ -405,6 +429,10 @@ function destroyRealtimeGames() {
   if (waveGame) {
     waveGame.destroy();
     waveGame = null;
+  }
+  if (fantasyGame) {
+    fantasyGame.destroy();
+    fantasyGame = null;
   }
 }
 
@@ -631,7 +659,11 @@ function syncRoom() {
       }
       if (!wormsGame) {
         microGame?.destroy();
+        waveGame?.destroy();
+        fantasyGame?.destroy();
         microGame = null;
+        waveGame = null;
+        fantasyGame = null;
         wormsGame = new WormsGame(elements.wormsStage, {
           onStatus: (message) => { elements.wormsStatus.textContent = message; },
           network: {
@@ -648,7 +680,11 @@ function syncRoom() {
     if (activeGameId === "micromachines") {
       if (!microGame) {
         wormsGame?.destroy();
+        waveGame?.destroy();
+        fantasyGame?.destroy();
         wormsGame = null;
+        waveGame = null;
+        fantasyGame = null;
         microGame = new MicroMachinesGame(elements.microStage, {
           onStatus: (message) => { elements.microStatus.textContent = message; },
           network: {
@@ -677,8 +713,10 @@ function syncRoom() {
       if (!waveGame) {
         wormsGame?.destroy();
         microGame?.destroy();
+        fantasyGame?.destroy();
         wormsGame = null;
         microGame = null;
+        fantasyGame = null;
         waveGame = new WaveRunnersGame(elements.waveStage, {
           bot: client.isHost,
           onStatus: (message) => { elements.waveStatus.textContent = message; },
@@ -696,6 +734,38 @@ function syncRoom() {
         });
       }
       waveGame.applyNetworkSnapshot(game);
+      return;
+    }
+    if (activeGameId === "fantasy-lanes") {
+      if (client.playerIndex > 1) {
+        destroyRealtimeGames();
+        showRealtimeUnavailable(elements.fantasyStage, "Spectating", "Fantasy Lanes is a two-player duel. You can watch this match and join the next room game.");
+        elements.fantasyStatus.textContent = "Spectating this duel";
+        return;
+      }
+      if (!fantasyGame) {
+        wormsGame?.destroy();
+        microGame?.destroy();
+        waveGame?.destroy();
+        wormsGame = null;
+        microGame = null;
+        waveGame = null;
+        fantasyGame = new FantasyLanesGame(elements.fantasyStage, {
+          onStatus: (message) => { elements.fantasyStatus.textContent = message; },
+          network: {
+            role: client.isHost ? "host" : "guest",
+            playerId: client.playerId,
+            getPlayers: () => client.players.slice(0, 2).map((player, index) => ({
+              id: player.id,
+              name: profileForPlayer(player, index === 0 ? "Host" : "Player 2"),
+            })),
+            publish: (snapshot) => client.setGameState("fantasy-lanes", snapshot, false),
+            sendInput: (input) => client.setLocalPlayerState("fantasy-lanes:input", input, false),
+            getInputs: () => client.getAllPlayerStates("fantasy-lanes:input"),
+          },
+        });
+      }
+      fantasyGame.applyNetworkSnapshot(game);
       return;
     }
     if (isValidGameState(game)) {
@@ -746,6 +816,16 @@ function setupRoomLabels() {
     elements.hint.textContent = "Choose 2-6 runners at the start. Connected players take slots first; the host fills the rest with bots.";
     return;
   }
+  if (activeGameId === "fantasy-lanes") {
+    const activePlayers = Math.min(client.playerCount, 2);
+    elements.role.textContent = client.playerIndex > 1 ? "Spectating" : (client.isHost ? "Azure commander" : "Crimson commander");
+    elements.players.textContent = `Players: ${activePlayers} / 2`;
+    elements.nameX.textContent = profileForPlayer(playerByIndex(0), "Host");
+    elements.nameO.textContent = playerByIndex(1) ? profileForPlayer(playerByIndex(1), "Player 2") : "Bot commander";
+    elements.newRound.hidden = true;
+    elements.hint.textContent = "Room duels use two active commanders; if the second seat is empty, a bot plays the enemy base.";
+    return;
+  }
   const side = roomPlayerSide();
   if (side === null) {
     elements.role.textContent = "Spectating";
@@ -781,13 +861,16 @@ function setupGameShell() {
   const isWorms = activeGameId === "worms";
   const isMicro = activeGameId === "micromachines";
   const isWave = activeGameId === "wave-runners";
-  elements.classicGameView.hidden = isWorms || isMicro || isWave;
+  const isFantasy = activeGameId === "fantasy-lanes";
+  elements.classicGameView.hidden = isWorms || isMicro || isWave || isFantasy;
   elements.wormsGameView.hidden = !isWorms;
   elements.microGameView.hidden = !isMicro;
   elements.waveGameView.hidden = !isWave;
+  elements.fantasyGameView.hidden = !isFantasy;
   elements.gameDialog.classList.toggle("is-worms", isWorms);
   elements.gameDialog.classList.toggle("is-micro", isMicro);
   elements.gameDialog.classList.toggle("is-wave", isWave);
+  elements.gameDialog.classList.toggle("is-fantasy", isFantasy);
   elements.board.setAttribute("aria-label", `${game.title} board`);
   elements.scoreboard.hidden = activeGameId === "durak";
   elements.markX.textContent = activeGameId === "checkers" ? "●" : "×";
@@ -804,10 +887,14 @@ function setupGameShell() {
       elements.microStatus.textContent = client.isHost
         ? "Choose a track for the room race"
         : "The race host is choosing a track...";
-    } else {
+    } else if (isWave) {
       elements.waveStatus.textContent = client.isHost
         ? "Choose a target score for the room run"
         : "The host is choosing a target score...";
+    } else if (isFantasy) {
+      elements.fantasyStatus.textContent = client.isHost
+        ? "Train troops and hold the center springs"
+        : "Send counters and pressure the open lanes";
     }
   }
   selectedChecker = null;
@@ -896,6 +983,19 @@ function openSoloGame(gameId) {
     destroyRealtimeGames();
     waveGame = new WaveRunnersGame(elements.waveStage, {
       onStatus: (message) => { elements.waveStatus.textContent = message; },
+    });
+    elements.gameDialog.requestFullscreen?.()
+      .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
+      .catch(() => {});
+    return;
+  }
+  if (activeGameId === "fantasy-lanes") {
+    setupGameShell();
+    elements.fantasyStatus.textContent = "Duel the bot across three open lanes";
+    openOverlay(elements.gameDialog, "game");
+    destroyRealtimeGames();
+    fantasyGame = new FantasyLanesGame(elements.fantasyStage, {
+      onStatus: (message) => { elements.fantasyStatus.textContent = message; },
     });
     elements.gameDialog.requestFullscreen?.()
       .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
@@ -998,6 +1098,27 @@ function launchForRoom(gameId) {
     client.setRoomState({
       screen: "game",
       activeGame: "wave-runners",
+      startedAt: Date.now(),
+      revision,
+    });
+    mode = "room";
+    setupGameShell();
+    openOverlay(elements.gameDialog, "game");
+    elements.gameDialog.requestFullscreen?.()
+      .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
+      .catch(() => {});
+    return;
+  }
+  if (gameId === "fantasy-lanes") {
+    client.setGameState("fantasy-lanes", {
+      kind: "fantasy-lanes",
+      phase: "playing",
+      revision: Date.now(),
+    });
+    const revision = (client.getRoomState()?.revision ?? 0) + 1;
+    client.setRoomState({
+      screen: "game",
+      activeGame: "fantasy-lanes",
       startedAt: Date.now(),
       revision,
     });
