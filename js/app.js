@@ -1462,6 +1462,10 @@ function renderDurakSetup() {
       <input name="throwIn" type="checkbox" ${options.throwIn ? "checked" : ""} />
       <span>Podkidnoy: after the attacker stops, other players may throw in</span>
     </label>
+    <label class="durak-check">
+      <input name="transferable" type="checkbox" ${options.transferable ? "checked" : ""} />
+      <span>Transferable: pass the attack with a card of the same rank</span>
+    </label>
     <label>
       Tournament target
       <select name="matchTarget">
@@ -1479,6 +1483,7 @@ function renderDurakSetup() {
     pendingDurakOptions = normalizeDurakOptions({
       playerCount: Math.max(Number(panel.elements.playerCount.value), minPlayers),
       throwIn: panel.elements.throwIn.checked,
+      transferable: panel.elements.transferable.checked,
       matchTarget: Number(panel.elements.matchTarget.value),
     });
     startConfiguredDurakGame();
@@ -1523,7 +1528,7 @@ function renderDurak(game, mySeat) {
     <span>Trump: <strong>${cardText(game.trump)}</strong></span>
     <span>Deck: <strong>${game.deck.length}</strong></span>
     <span>Discard: <strong>${game.discard.length}</strong></span>
-    <span>${game.options.throwIn ? "Podkidnoy" : "Classic"}</span>
+    <span>${game.options.throwIn ? "Podkidnoy" : "Classic"}${game.options.transferable ? " + Transferable" : ""}</span>
     <span>Target: <strong>${game.options.matchTarget}</strong></span>
   `;
   table.append(header);

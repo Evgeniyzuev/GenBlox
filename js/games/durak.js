@@ -8,6 +8,7 @@ export const DURAK_PLAYER_RANGE = Object.freeze({ MIN: MIN_PLAYERS, MAX: MAX_PLA
 export const DEFAULT_DURAK_OPTIONS = Object.freeze({
   playerCount: 4,
   throwIn: false,
+  transferable: false,
   matchTarget: 1,
 });
 
@@ -32,6 +33,7 @@ export function normalizeDurakOptions(options = {}) {
   return {
     playerCount: clamp(options.playerCount ?? DEFAULT_DURAK_OPTIONS.playerCount, MIN_PLAYERS, MAX_PLAYERS),
     throwIn: Boolean(options.throwIn ?? DEFAULT_DURAK_OPTIONS.throwIn),
+    transferable: Boolean(options.transferable ?? DEFAULT_DURAK_OPTIONS.transferable),
     matchTarget: clamp(options.matchTarget ?? DEFAULT_DURAK_OPTIONS.matchTarget, 1, 9),
   };
 }
@@ -55,7 +57,17 @@ function activeIndexes(game) {
   return game.players.map((_, index) => index).filter((index) => !game.out.includes(index));
 }
 function attackLimit(game) {
+  if (game.taking) return HAND_LIMIT;
   return Math.min(HAND_LIMIT, game.defenderHandAtStart ?? game.players[game.defender]?.hand.length ?? HAND_LIMIT);
+}
+
+function legalTransferCards(game, playerIndex) {
+  if (!game.options.transferable || playerIndex !== game.defender || game.taking) return [];
+  if (!game.table.length || game.table.some((pair) => pair.defense)) return [];
+  const nextDefender = nextActive(game, playerIndex);
+  if (nextDefender === playerIndex || game.table.length >= Math.min(HAND_LIMIT, game.players[nextDefender]?.hand.length ?? 0)) return [];
+  const attackRank = game.table.find((pair) => !pair.defense)?.attack.rank;
+  return (game.players[playerIndex]?.hand ?? []).filter((card) => card.rank === attackRank);
 }
 
 export function cardText(card) {
@@ -135,7 +147,7 @@ function normalizeDuel(game) {
 }
 
 function throwerCandidates(game, from) {
-  if (!game.options.throwIn || !game.table.length || game.table.some((pair) => !pair.defense)) return [];
+  if (!game.options.throwIn || !game.table.length || (!game.taking && game.table.some((pair) => !pair.defense))) return [];
   const count = playerCount(game);
   const candidates = [];
   for (let step = 1; step <= count; step += 1) {
@@ -150,6 +162,23 @@ function throwerCandidates(game, from) {
     }
   }
   return candidates;
+}
+
+function completeTake(game) {
+  const players = game.players.map((player) => ({ ...player, hand: [...player.hand] }));
+  players[game.defender].hand.push(...tableCards(game.table));
+  const nextAttacker = nextActive(game, game.defender);
+  const count = playerCount(game);
+  const drawOrder = [game.attacker, ...Array.from({ length: count }, (_, index) => index).filter((index) => index !== game.attacker)];
+  const drawn = drawCards({ ...game, players }, drawOrder);
+  const candidate = refreshOut({
+    ...game, ...drawn, table: [], attacker: nextAttacker,
+    defender: nextActive({ ...game, out: game.out }, nextAttacker), turn: nextAttacker,
+    selectedAttack: null, defenderHandAtStart: null, passedThrowers: [], taking: false,
+    revision: game.revision + 1,
+  });
+  if (candidate.phase === "finished") return candidate;
+  return normalizeDuel({ ...candidate, defender: nextActive(candidate, candidate.attacker) });
 }
 
 function afterSuccessfulDefense(game, defenderIndex) {
@@ -202,6 +231,7 @@ function completeDefense(game) {
     selectedAttack: null,
     defenderHandAtStart: null,
     passedThrowers: [],
+    taking: false,
     revision: game.revision + 1,
   });
   if (candidate.phase === "finished") return candidate;
@@ -239,6 +269,7 @@ export function createDurakGame(previous = null, rawOptions = null) {
     selectedAttack: null,
     defenderHandAtStart: null,
     passedThrowers: [],
+    taking: false,
     out: [],
     scores: previous?.scores?.length === options.playerCount ? previous.scores : Array(options.playerCount).fill(0),
     winner: null,
@@ -255,7 +286,7 @@ export function getDurakActions(game, playerIndex) {
   if (playerIndex === game.defender && game.turn === playerIndex) {
     const pair = game.table.find((entry) => !entry.defense);
     return {
-      cards: pair ? legalDefenseCards(game, pair.attack, playerIndex) : [],
+      cards: pair ? [...legalDefenseCards(game, pair.attack, playerIndex), ...legalTransferCards(game, playerIndex)] : [],
       canTake: game.table.some((entry) => !entry.defense),
       canPass: false,
     };
@@ -264,7 +295,7 @@ export function getDurakActions(game, playerIndex) {
     return {
       cards: legalAttackCards(game, playerIndex),
       canTake: false,
-      canPass: game.table.length > 0 && game.table.every((pair) => pair.defense),
+      canPass: game.table.length > 0 && (game.taking || game.table.every((pair) => pair.defense)),
     };
   }
   return { cards: [], canTake: false, canPass: false };
@@ -281,19 +312,31 @@ export function playDurakCard(game, cardId, playerIndex) {
     if (!legalAttackCards(game, playerIndex).some((legal) => legal.id === cardId)) return game;
     players[playerIndex].hand = hand.filter((candidate) => candidate.id !== cardId);
     const startsBattle = game.table.length === 0;
-    return {
+    const attacked = {
       ...game,
       players,
       table: [...game.table, { attack: card, defense: null }],
-      turn: game.defender,
+      turn: game.taking ? playerIndex : game.defender,
       selectedAttack: card.id,
       defenderHandAtStart: startsBattle ? game.players[game.defender]?.hand.length ?? HAND_LIMIT : game.defenderHandAtStart,
       passedThrowers: startsBattle ? [] : game.passedThrowers,
       revision: game.revision + 1,
     };
+    if (game.taking && attacked.table.length >= attackLimit(attacked)) return completeTake(attacked);
+    return attacked;
   }
 
   const target = game.table.find((pair) => !pair.defense);
+  if (target && legalTransferCards(game, playerIndex).some((legal) => legal.id === cardId)) {
+    const newDefender = nextActive(game, playerIndex);
+    players[playerIndex].hand = hand.filter((candidate) => candidate.id !== cardId);
+    return {
+      ...game, players, table: [...game.table, { attack: card, defense: null }],
+      attacker: playerIndex, defender: newDefender, turn: newDefender,
+      defenderHandAtStart: game.players[newDefender]?.hand.length ?? HAND_LIMIT,
+      selectedAttack: card.id, passedThrowers: [], revision: game.revision + 1,
+    };
+  }
   if (!target || !canBeat(target.attack, card, game.trump.suit)) return game;
   players[playerIndex].hand = hand.filter((candidate) => candidate.id !== cardId);
   const table = game.table.map((pair) => pair.attack.id === target.attack.id ? { ...pair, defense: card } : pair);
@@ -310,7 +353,7 @@ export function playDurakCard(game, cardId, playerIndex) {
 
 export function passDurak(game, playerIndex) {
   if (!isDurakState(game) || playerIndex === game.defender || game.turn !== playerIndex) return game;
-  if (!game.table.length || game.table.some((pair) => !pair.defense)) return game;
+  if (!game.table.length || (!game.taking && game.table.some((pair) => !pair.defense))) return game;
 
   const passed = [...new Set([...(game.passedThrowers ?? []), playerIndex])];
   const withPass = { ...game, passedThrowers: passed };
@@ -322,32 +365,14 @@ export function passDurak(game, playerIndex) {
       revision: game.revision + 1,
     };
   }
-  return completeDefense(withPass);
+  return game.taking ? completeTake(withPass) : completeDefense(withPass);
 }
 
 export function takeDurak(game, playerIndex) {
   if (!isDurakState(game) || playerIndex !== game.defender || game.turn !== playerIndex) return game;
   if (!game.table.some((pair) => !pair.defense)) return game;
-  const players = game.players.map((player) => ({ ...player, hand: [...player.hand] }));
-  players[playerIndex].hand.push(...tableCards(game.table));
-  const nextAttacker = nextActive(game, playerIndex);
-  const count = playerCount(game);
-  const drawOrder = [game.attacker, ...Array.from({ length: count }, (_, index) => index).filter((index) => index !== game.attacker)];
-  const drawn = drawCards({ ...game, players }, drawOrder);
-  const candidate = refreshOut({
-    ...game,
-    ...drawn,
-    table: [],
-    attacker: nextAttacker,
-    defender: nextActive({ ...game, out: game.out }, nextAttacker),
-    turn: nextAttacker,
-    selectedAttack: null,
-    defenderHandAtStart: null,
-    passedThrowers: [],
-    revision: game.revision + 1,
-  });
-  if (candidate.phase === "finished") return candidate;
-  return normalizeDuel({ ...candidate, defender: nextActive(candidate, candidate.attacker) });
+  const taking = { ...game, taking: true, turn: game.attacker, passedThrowers: [], revision: game.revision + 1 };
+  return legalAttackCards(taking, game.attacker).length ? taking : completeTake(taking);
 }
 
 export function chooseDurakBotAction(game, playerIndex) {
