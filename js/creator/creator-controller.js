@@ -1,6 +1,7 @@
 import { GenBloxFormatError, parseGenBloxFile, serializeGenBloxFile } from "./genblox-format.js";
 import { AI_PROMPT, CREATOR_TEMPLATES, TIC_TAC_TOE_FILE } from "./templates.js";
 import { buildPreviewDocument } from "./preview.js";
+import { initOnlineSaving } from "./online-saving.js";
 
 const DRAFT_KEY = "genblox:creator-drafts:v1";
 const TOUR_KEY = "genblox:creator-tour:v1";
@@ -38,5 +39,6 @@ export function initCreator({ profile = () => ({ name: "Player", avatar: "🙂" 
   file.onchange=async()=>{const picked=file.files?.[0];if(!picked)return;if(picked.size>240000){setStatus('This game file is too big.','error','Ask AI to make it smaller than 240 KB.');return;}text.value=await picked.text();run();file.value='';};
   window.addEventListener('message',event=>{if(event.source!==frame.contentWindow||event.data?.source!=='genblox-game')return;const {type,payload}=event.data;if(type==='ready')setStatus('Your game is running. Have fun testing it!');if(type==='finish')setStatus(`Game finished${Number.isFinite(payload?.score)?` — score: ${payload.score}`:''}. Change it or share the text with AI.`);if(type==='restart')run(text.value,false);if(type==='error')setStatus('The game stopped because of a code error.','error',`${payload?.message||'Unknown error'}${payload?.line?` (line ${payload.line})`:''}`);});
   frame.addEventListener('load',()=>{setTimeout(()=>{if(frame.srcdoc&&status.textContent.startsWith('Your game is ready'))setStatus('The preview loaded. If nothing moves, open Details.','ok','The game did not call GenBlox.ready() within the expected time.');},3000)});
+  initOnlineSaving({getSource:()=>text.value,setCreatorStatus:setStatus});
   renderVersions();
 }

@@ -17,8 +17,8 @@
       src="https://unpkg.com/qrcodejs@1.0.0/qrcode.min.js"
       crossorigin="anonymous"
     ></script>
-    <script type="module" crossorigin src="/assets/index-BngIT7Wp.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DHsK2bdE.css">
+    <script type="module" crossorigin src="/assets/index-BQVsLn-_.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CYZOK7c9.css">
   </head>
   <body>
     <header class="topbar">
@@ -348,6 +348,13 @@
           <section class="creator-player"><div class="creator-player-heading"><strong>Safe preview</strong><small>Your game cannot open your GenBlox profile or page.</small></div><iframe id="creator-preview" title="Your game preview" sandbox="allow-scripts"></iframe></section>
         </div>
         <section class="creator-history"><div class="creator-history-heading"><div><h3>Your saved versions</h3><p>Up to 10 versions stay on this device.</p></div><button class="danger-button" id="creator-delete-all" type="button">Delete all</button></div><div id="creator-versions"></div></section>
+        <section class="creator-online" id="creator-online">
+          <div><p class="eyebrow">PRIVATE ONLINE COPY</p><h3>Keep it safe online</h3><p>Use a parent email. A private copy can be opened only by your account.</p></div>
+          <form id="creator-auth-form"><label for="creator-parent-email">Parent email</label><div><input id="creator-parent-email" type="email" autocomplete="email" required placeholder="parent@example.com" /><button class="secondary-button" type="submit">Send sign-in link</button></div></form>
+          <div id="creator-account" hidden><strong id="creator-account-label">Parent email connected</strong><button class="secondary-button" id="creator-sign-out" type="button">Sign out</button></div>
+          <button class="primary-button" id="creator-save-online" type="button" hidden>Save online</button>
+          <p id="creator-online-status" aria-live="polite"></p>
+        </section>
       </div>
     </dialog>
 

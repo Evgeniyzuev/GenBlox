@@ -16,6 +16,7 @@
 ## Готово к работе
 
 - [ ] Провести тест компьютер ↔ телефон через код и QR Playroom
+- [ ] Creator: проверить magic-link и `Save online` на опубликованном URL
 
 ## В работе
 
@@ -27,6 +28,9 @@
 
 ## Готово
 
+- [x] Creator: добавлены passwordless-вход через email родителя и выход из аккаунта
+- [x] Creator: добавлено атомарное `Save online` приватной неизменяемой версии
+- [x] Creator: применена отдельная Supabase-схема с RLS и закрытым anon-доступом
 - [x] Creator: добавлен Sky Runner с Canvas, keyboard/touch и привязкой к Wave Runners
 - [x] Creator: добавлен явный выбор между Tic-Tac-Toe, Sky Runner и Star Clicker
 - [x] Creator: добавлено удаление одной или всех локальных версий с подтверждением
