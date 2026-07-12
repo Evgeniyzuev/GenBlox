@@ -1,5 +1,5 @@
 import { GenBloxFormatError, parseGenBloxFile, serializeGenBloxFile } from "./genblox-format.js";
-import { AI_PROMPT, CLICKER_FILE } from "./templates.js";
+import { AI_PROMPT, CREATOR_TEMPLATES, TIC_TAC_TOE_FILE } from "./templates.js";
 import { buildPreviewDocument } from "./preview.js";
 
 const DRAFT_KEY = "genblox:creator-drafts:v1";
@@ -14,17 +14,17 @@ export function initCreator({ profile = () => ({ name: "Player", avatar: "🙂" 
   const text=document.querySelector('#creator-source'), file=document.querySelector('#creator-file'), frame=document.querySelector('#creator-preview');
   const status=document.querySelector('#creator-status'), details=document.querySelector('#creator-details'), versions=document.querySelector('#creator-versions');
   const tour=document.querySelector('#creator-tour'), tourText=document.querySelector('#creator-tour-text'), tourCount=document.querySelector('#creator-tour-count');
-  let current=null, tourIndex=0;
+  let current=null, currentFilename='tic-tac-toe-remix.genblox.txt', tourIndex=0;
   const setStatus=(message,kind='ok',detail='')=>{status.textContent=message;status.dataset.kind=kind;details.hidden=!detail;details.replaceChildren();if(detail){const summary=document.createElement('summary');summary.textContent='Details';const copy=document.createElement('p');copy.textContent=detail;details.append(summary,copy);}};
   const renderVersions=()=>{const drafts=readDrafts();versions.replaceChildren(...drafts.map((draft,index)=>{const b=document.createElement('button');b.type='button';b.className='creator-version';b.textContent=`Version ${drafts.length-index} · ${new Date(draft.savedAt).toLocaleString()}`;b.onclick=()=>{text.value=draft.source;run(draft.source,false)};return b;}));};
   const saveVersion=(source)=>{const drafts=readDrafts();if(drafts[0]?.source===source)return;drafts.unshift({source,savedAt:Date.now()});localStorage.setItem(DRAFT_KEY,JSON.stringify(drafts.slice(0,10)));renderVersions();};
   const run=(source=text.value,save=true)=>{try{current=parseGenBloxFile(source);text.value=serializeGenBloxFile(current);frame.srcdoc=buildPreviewDocument(current);setStatus('Your game is ready! Try it in the preview.');if(save)saveVersion(text.value);}catch(error){current=null;frame.removeAttribute('srcdoc');const e=error instanceof GenBloxFormatError?error:new GenBloxFormatError(error.message);setStatus(e.message,'error',`${e.line?`Line ${e.line}. `:''}${e.hint}`);}};
-  const open=(template=null)=>{const source=template??readDrafts()[0]?.source??CLICKER_FILE;text.value=source;dialog.showModal();run(source,false);if(!localStorage.getItem(TOUR_KEY))showTour(0);};
+  const open=(template=null,filename='tic-tac-toe-remix.genblox.txt')=>{const source=template??readDrafts()[0]?.source??TIC_TAC_TOE_FILE;currentFilename=filename;text.value=source;dialog.showModal();run(source,false);if(!localStorage.getItem(TOUR_KEY))showTour(0);};
   const showTour=(index)=>{tourIndex=Math.max(0,Math.min(steps.length-1,index));tour.hidden=false;tourText.textContent=steps[tourIndex];tourCount.textContent=`${tourIndex+1} / ${steps.length}`;};
   document.querySelector('#open-creator').onclick=()=>open();
-  document.querySelectorAll('.space-card .card-actions').forEach(actions=>{const b=document.createElement('button');b.className='remix-button';b.type='button';b.textContent='Make your own version';b.onclick=()=>open(CLICKER_FILE);actions.append(b);});
+  document.querySelectorAll('.space-card .card-actions').forEach(actions=>{const gameId=actions.querySelector('[data-game]')?.dataset.game;const template=CREATOR_TEMPLATES[gameId]??CREATOR_TEMPLATES.clicker;const b=document.createElement('button');b.className='remix-button';b.type='button';b.textContent='Make your own version';b.onclick=()=>open(template.file,template.filename);actions.append(b);});
   document.querySelector('#close-creator').onclick=()=>dialog.close(); dialog.addEventListener('cancel',e=>{e.preventDefault();dialog.close()});
-  document.querySelector('#creator-download').onclick=()=>download('star-clicker.genblox.txt',text.value||CLICKER_FILE);
+  document.querySelector('#creator-download').onclick=()=>download(currentFilename,text.value||TIC_TAC_TOE_FILE);
   document.querySelector('#creator-copy').onclick=async()=>{try{await navigator.clipboard.writeText(text.value);setStatus('Game code copied. Attach or paste it into your AI chat.');}catch{text.select();setStatus('The code is selected. Copy it now.');}};
   document.querySelector('#creator-copy-prompt').onclick=async()=>{await navigator.clipboard.writeText(AI_PROMPT);setStatus('AI prompt copied.');};
   document.querySelector('#creator-run').onclick=()=>run(); document.querySelector('#creator-restart').onclick=()=>current&&run(serializeGenBloxFile(current),false);
