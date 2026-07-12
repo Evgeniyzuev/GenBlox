@@ -27,6 +27,7 @@
         <span>GEN<span>BLOX</span></span>
       </a>
       <div class="topbar-actions">
+        <button class="creator-top-button" id="open-creator" type="button">Create a Game</button>
         <button class="player-button" id="open-player-menu" type="button" aria-label="Player profile">
           <span id="player-button-avatar">🙂</span>
           <span id="player-button-name">Player</span>
@@ -316,6 +317,37 @@
 
           <button class="primary-button" type="submit">Save Profile</button>
         </form>
+      </div>
+    </dialog>
+
+    <dialog class="creator-dialog" id="creator-dialog">
+      <div class="creator-shell">
+        <header class="game-header creator-header">
+          <div><p class="eyebrow">GENBLOX CREATOR</p><h2>Create your game</h2></div>
+          <div class="game-header-actions">
+            <button class="secondary-button" id="creator-help" type="button">? How to make a game</button>
+            <button class="icon-button" id="close-creator" type="button" aria-label="Close Creator">×</button>
+          </div>
+        </header>
+
+        <aside class="creator-tour" id="creator-tour" hidden aria-live="polite">
+          <div class="tour-picture" aria-hidden="true">🤖 <span>→</span> 🎮</div>
+          <div><small id="creator-tour-count">1 / 7</small><strong id="creator-tour-text">Choose a game template</strong><p>Follow one small step at a time. You can open this guide again whenever you need it.</p></div>
+          <div class="tour-actions"><button id="creator-tour-prev" type="button">Back</button><button id="creator-tour-next" type="button">Next</button><button id="creator-tour-skip" type="button">Skip guide</button></div>
+        </aside>
+
+        <section class="creator-steps">
+          <article><span>1</span><h3>Get a template</h3><p>Download the text file or copy all its code.</p><div><button class="primary-button" id="creator-download" type="button">Download TXT</button><button class="secondary-button" id="creator-copy" type="button">Copy game code</button></div></article>
+          <article><span>2</span><h3>Change it with AI</h3><p>Attach the TXT to your AI chat and tell it your game idea.</p><button class="secondary-button" id="creator-copy-prompt" type="button">Copy AI prompt</button></article>
+          <article><span>3</span><h3>Bring it back</h3><p>Upload the new TXT, or paste the complete text below.</p><label class="creator-upload">Upload GenBlox TXT<input id="creator-file" type="file" accept=".txt,text/plain" /></label></article>
+        </section>
+
+        <p class="creator-safety">🛡️ Stay safe: never share your real name, address, school, password, or someone else's photos.</p>
+        <div class="creator-workspace">
+          <section class="creator-editor"><label for="creator-source">Game text</label><textarea id="creator-source" spellcheck="false"></textarea><div class="creator-editor-actions"><button class="primary-button" id="creator-run" type="button">Test my game</button><button class="secondary-button" id="creator-restart" type="button">Restart</button></div><p class="creator-status" id="creator-status" aria-live="polite"></p><details id="creator-details" hidden><summary>Details</summary></details></section>
+          <section class="creator-player"><div class="creator-player-heading"><strong>Safe preview</strong><small>Your game cannot open your GenBlox profile or page.</small></div><iframe id="creator-preview" title="Your game preview" sandbox="allow-scripts"></iframe></section>
+        </div>
+        <section class="creator-history"><h3>Your saved versions</h3><p>Up to 10 versions stay on this device.</p><div id="creator-versions"></div></section>
       </div>
     </dialog>
 

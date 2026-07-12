@@ -47,6 +47,7 @@ import { WormsGame } from "./games/worms.js";
 import { MicroMachinesGame } from "./games/micromachines.js";
 import { WaveRunnersGame } from "./games/wave-runners.js";
 import { FantasyLanesGame } from "./games/fantasy-lanes.js";
+import { initCreator } from "./creator/creator-controller.js";
 
 const GAMES = {
   "tic-tac-toe": {
@@ -1789,6 +1790,7 @@ window.addEventListener("popstate", handlePopState);
 
 renderPlayerProfile();
 buildBoard("tic-tac-toe");
+initCreator({ profile: () => ({ ...playerProfile }) });
 
 const invitedCode = roomCodeFromUrl();
 if (invitedCode) {
