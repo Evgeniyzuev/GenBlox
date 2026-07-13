@@ -30,7 +30,7 @@
 
 - [x] Исправлен статический запуск: Supabase загружается лениво и не блокирует каталог
 - [x] Production-развёртывание переведено на `pnpm build` с публикацией `dist`
-- [x] Creator: добавлены passwordless-вход через email родителя и выход из аккаунта
+- [x] Creator: добавлены passwordless-вход через email и выход из аккаунта
 - [x] Creator: добавлено атомарное `Save online` приватной неизменяемой версии
 - [x] Creator: применена отдельная Supabase-схема с RLS и закрытым anon-доступом
 - [x] Creator: добавлен Sky Runner с Canvas, keyboard/touch и привязкой к Wave Runners
