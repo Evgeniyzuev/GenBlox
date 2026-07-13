@@ -77,3 +77,21 @@ $$;
 
 revoke all on function public.save_creator_version(uuid,jsonb,text) from public;
 grant execute on function public.save_creator_version(uuid,jsonb,text) to authenticated;
+
+create or replace function public.delete_creator_game(p_game_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_owner uuid := auth.uid();
+begin
+  if v_owner is null then raise exception 'Authentication required'; end if;
+  delete from public.creator_games where id=p_game_id and owner_id=v_owner;
+  return found;
+end;
+$$;
+
+revoke all on function public.delete_creator_game(uuid) from public;
+grant execute on function public.delete_creator_game(uuid) to authenticated;
