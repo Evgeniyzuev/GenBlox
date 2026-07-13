@@ -1,14 +1,15 @@
-import { createClient } from "@supabase/supabase-js";
 import { parseGenBloxFile } from "./genblox-format.js";
 
 const PROJECTS_KEY = "genblox:creator-online-projects:v1";
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// `import.meta.env` exists after a Vite build. Keep the rest of GenBlox usable
+// when the source files are served directly by a simple static server.
+const url = import.meta.env?.VITE_SUPABASE_URL ?? "";
+const anonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY ?? "";
 
 function readProjects() { try { return JSON.parse(localStorage.getItem(PROJECTS_KEY) || "{}"); } catch { return {}; } }
 function saveProject(templateId, gameId) { const projects=readProjects();projects[templateId]=gameId;localStorage.setItem(PROJECTS_KEY,JSON.stringify(projects)); }
 
-export function initOnlineSaving({ getSource, setCreatorStatus }) {
+export async function initOnlineSaving({ getSource, setCreatorStatus }) {
   const panel=document.querySelector('#creator-online');
   const authForm=document.querySelector('#creator-auth-form');
   const email=document.querySelector('#creator-parent-email');
@@ -20,6 +21,12 @@ export function initOnlineSaving({ getSource, setCreatorStatus }) {
   if(!panel)return;
   if(!url||!anonKey){panel.dataset.state='unconfigured';onlineStatus.textContent='Online saving is not configured yet.';authForm.hidden=true;saveButton.hidden=true;return;}
 
+  let createClient;
+  try {
+    ({ createClient } = await import("@supabase/supabase-js"));
+  } catch {
+    panel.dataset.state='unconfigured';onlineStatus.textContent='Online saving could not load. Local games still work.';authForm.hidden=true;saveButton.hidden=true;return;
+  }
   const supabase=createClient(url,anonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
   const renderSession=(session)=>{const signedIn=Boolean(session?.user);authForm.hidden=signedIn;account.hidden=!signedIn;saveButton.hidden=!signedIn;accountLabel.textContent=signedIn?'Parent email connected':'';onlineStatus.textContent=signedIn?'Your online copies are private.':'';};
   supabase.auth.getSession().then(({data})=>renderSession(data.session));
