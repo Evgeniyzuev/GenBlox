@@ -348,6 +348,9 @@ export function playDurakCard(game, cardId, playerIndex) {
     revision: game.revision + 1,
   };
 
+  // A transferred attack can contain several unbeaten cards. After covering
+  // one of them, the defender must keep the turn until every attack is covered.
+  if (table.some((pair) => !pair.defense)) return { ...defended, turn: playerIndex };
   return players[playerIndex].hand.length === 0 ? completeDefense(defended) : afterSuccessfulDefense(defended, playerIndex);
 }
 
