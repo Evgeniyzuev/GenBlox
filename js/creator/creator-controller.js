@@ -3,6 +3,7 @@ import { AI_PROMPT, CREATOR_TEMPLATES, TIC_TAC_TOE_FILE } from "./templates.js";
 import { buildPreviewDocument } from "./preview.js";
 import { initOnlineSaving } from "./online-saving.js";
 import { validateCreatorStateWrite } from "./multiplayer.js";
+import { HtmlImportError, convertStandaloneHtml } from "./html-import.js";
 
 const DRAFT_KEY = "genblox:creator-drafts:v1";
 const TOUR_KEY = "genblox:creator-tour:v1";
@@ -17,7 +18,7 @@ export function initCreator({
   multiplayer = null,
 } = {}) {
   const dialog=document.querySelector('#creator-dialog'); if(!dialog) return;
-  const text=document.querySelector('#creator-source'), file=document.querySelector('#creator-file'), frame=document.querySelector('#creator-preview');
+  const text=document.querySelector('#creator-source'), file=document.querySelector('#creator-file'), htmlFile=document.querySelector('#creator-html-file'), frame=document.querySelector('#creator-preview');
   const templateSelect=document.querySelector('#creator-template');
   const status=document.querySelector('#creator-status'), details=document.querySelector('#creator-details'), versions=document.querySelector('#creator-versions');
   const previewMode=document.querySelector('#creator-preview-mode');
@@ -51,6 +52,7 @@ export function initCreator({
   document.querySelector('#creator-help').onclick=()=>showTour(0); document.querySelector('#creator-tour-prev').onclick=()=>showTour(tourIndex-1); document.querySelector('#creator-tour-next').onclick=()=>tourIndex===steps.length-1?closeTour():showTour(tourIndex+1);
   const closeTour=()=>{tour.hidden=true;localStorage.setItem(TOUR_KEY,'done')}; document.querySelector('#creator-tour-skip').onclick=closeTour;
   file.onchange=async()=>{const picked=file.files?.[0];if(!picked)return;if(picked.size>240000){setStatus('This game file is too big.','error','Ask AI to make it smaller than 240 KB.');return;}text.value=await picked.text();run();file.value='';};
+  htmlFile.onchange=async()=>{const picked=htmlFile.files?.[0];if(!picked)return;try{if(picked.size>240000)throw new HtmlImportError('The HTML file is too big.','Keep the complete standalone HTML file smaller than 240 KB.');const imported=convertStandaloneHtml(await picked.text(),{filename:picked.name});currentFilename=picked.name.replace(/\.html?$/i,'')+'.genblox.txt';text.value=imported.source;if(run(imported.source))setStatus('HTML imported! It is now a safe GenBlox game. Test it, then download the converted TXT.');}catch(error){const detail=error instanceof HtmlImportError?error.hint:error.message;setStatus(error.message||'The HTML file could not be imported.','error',detail);}finally{htmlFile.value='';}};
   window.addEventListener('message',event=>{if(event.source!==frame.contentWindow||event.data?.source!=='genblox-game')return;const {type,payload}=event.data;if(type==='ready'){syncPreview();setStatus('Your game is running. Have fun testing it!');}if(type==='set-state')writeSharedState(payload?.key,payload?.value);if(type==='finish')setStatus(`Game finished${Number.isFinite(payload?.score)?` — score: ${payload.score}`:''}. Change it or share the text with AI.`);if(type==='restart')run(text.value,false);if(type==='error')setStatus('The game stopped because of a code error.','error',`${payload?.message||'Unknown error'}${payload?.line?` (line ${payload.line})`:''}`);});
   frame.addEventListener('load',()=>{syncPreview();setTimeout(()=>{if(frame.srcdoc&&status.textContent.startsWith('Your game is ready'))setStatus('The preview loaded. If nothing moves, open Details.','ok','The game did not call GenBlox.ready() within the expected time.');},3000)});
   setInterval(syncPreview,150);
