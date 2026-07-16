@@ -50,7 +50,7 @@ import { FantasyLanesGame } from "./games/fantasy-lanes.js";
 import { initCreator } from "./creator/creator-controller.js";
 import { normalizeCreatorGameId, validateCreatorStateWrite } from "./creator/multiplayer.js";
 import { parseGenBloxFile } from "./creator/genblox-format.js";
-import { assembleCreatorRoomSource, createCreatorRoomDelivery } from "./creator/room-delivery.js";
+import { assembleCreatorRoomSource, publishCreatorRoomDelivery } from "./creator/room-delivery.js";
 import { CreatorRoomRuntime } from "./creator/room-runtime.js";
 
 const GAMES = {
@@ -402,29 +402,8 @@ function setCreatorMultiplayerState(templateId, key, value) {
   });
 }
 
-function launchCreatorRoomGame({ source, game }) {
-  if (!client?.started) throw new Error("Join or create a room first.");
-  const delivery = createCreatorRoomDelivery(source, game.manifest);
-  delivery.chunks.forEach((chunk, index) => {
-    client.setGameState(`creator-room:chunk:${index}`, {
-      sessionId: delivery.meta.sessionId,
-      index,
-      source: chunk,
-    });
-  });
-  client.setGameState(normalizeCreatorGameId(delivery.meta.sessionId), {
-    kind: "creator-preview",
-    values: {},
-    revision: 1,
-  });
-  const revision = (client.getRoomState()?.revision ?? 0) + 1;
-  client.setRoomState({
-    screen: "game",
-    activeGame: "creator-room",
-    creatorGame: delivery.meta,
-    startedAt: Date.now(),
-    revision,
-  });
+async function launchCreatorRoomGame({ source, game }) {
+  return publishCreatorRoomDelivery(client, source, game.manifest);
 }
 
 function readCreatorRoomSource(meta) {
