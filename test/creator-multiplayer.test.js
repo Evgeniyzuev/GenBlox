@@ -12,6 +12,8 @@ import {
   CreatorRoomDeliveryError,
   assembleCreatorRoomSource,
   createCreatorRoomDelivery,
+  createCreatorSessionId,
+  publishCreatorRoomDelivery,
 } from "../js/creator/room-delivery.js";
 
 test("creator multiplayer namespaces user-controlled template ids", () => {
@@ -62,4 +64,52 @@ test("creator room delivery waits for every chunk and detects corruption", () =>
   const corrupt = delivery.chunks.map((chunk, index) => ({ sessionId: "room-test", index, source: `${chunk}!` }));
   assert.throws(() => assembleCreatorRoomSource(delivery.meta, corrupt), /integrity check/);
   assert.throws(() => createCreatorRoomDelivery("ю".repeat(130_000), CLICKER_GAME.manifest, "too-large"), CreatorRoomDeliveryError);
+});
+
+test("creator room session ids work without randomUUID", () => {
+  const id = createCreatorSessionId({
+    getRandomValues(values) {
+      values.set([1, 2, 3, 4]);
+      return values;
+    },
+  });
+  assert.equal(id, "00000001-00000002-00000003-00000004");
+  assert.match(createCreatorSessionId({}), /^[a-z0-9]+-[a-z0-9]+-[a-z0-9]+$/);
+});
+
+test("creator room publish confirms chunks before opening the game", async () => {
+  const gameStates = new Map();
+  let roomState = { revision: 4 };
+  const client = {
+    started: true,
+    getGameState: (key) => gameStates.get(key),
+    setGameState: (key, value) => gameStates.set(key, value),
+    getRoomState: () => roomState,
+    setRoomState: (value) => { roomState = value; },
+  };
+
+  const source = "=== GENBLOX GAME 1 ===\n" + "x".repeat(7_000);
+  const meta = await publishCreatorRoomDelivery(client, source, CLICKER_GAME.manifest, { sessionId: "publish-test", timeoutMs: 100 });
+
+  assert.equal(meta.sessionId, "publish-test");
+  assert.equal(gameStates.get("creator-room:chunk:0").source, source.slice(0, 6_000));
+  assert.deepEqual(gameStates.get("creator-preview:publish-test").values, {});
+  assert.equal(roomState.activeGame, "creator-room");
+  assert.equal(roomState.creatorGame.sessionId, "publish-test");
+  assert.equal(roomState.revision, 5);
+});
+
+test("creator room publish reports a Playroom delivery failure", async () => {
+  const client = {
+    started: true,
+    getGameState: () => undefined,
+    setGameState: () => {},
+    getRoomState: () => ({ revision: 0 }),
+    setRoomState: () => {},
+  };
+
+  await assert.rejects(
+    publishCreatorRoomDelivery(client, "room game", CLICKER_GAME.manifest, { sessionId: "failed-test", timeoutMs: 10 }),
+    /did not confirm the room game upload/,
+  );
 });

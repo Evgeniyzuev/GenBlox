@@ -74,16 +74,16 @@ function waitFor(check, timeoutMs, pollMs = 50) {
   });
 }
 
-export async function publishCreatorRoomDelivery(client, source, manifest, { timeoutMs = 6_000, sessionId } = {}) {
+export async function publishCreatorRoomDelivery(client, source, manifest, { timeoutMs = 12_000, sessionId } = {}) {
   if (!client?.started) throw new CreatorRoomDeliveryError("Join or create a room first.");
   const delivery = createCreatorRoomDelivery(source, manifest, sessionId ?? createCreatorSessionId());
   try {
     delivery.chunks.forEach((chunk, index) => {
       client.setGameState(`creator-room:chunk:${index}`, { sessionId: delivery.meta.sessionId, index, source: chunk });
     });
-    await waitFor(() => delivery.chunks.every((_chunk, index) => {
+    await waitFor(() => delivery.chunks.every((chunk, index) => {
       const record = client.getGameState(`creator-room:chunk:${index}`);
-      return record?.sessionId === delivery.meta.sessionId && record?.index === index && typeof record.source === "string";
+      return record?.sessionId === delivery.meta.sessionId && record?.index === index && record?.source === chunk;
     }), timeoutMs);
 
     client.setGameState(`creator-preview:${delivery.meta.sessionId}`, {

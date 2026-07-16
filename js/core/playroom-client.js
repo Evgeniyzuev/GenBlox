@@ -1,6 +1,13 @@
 const ROOM_KEY = "genblox:room";
 const GAME_KEY_PREFIX = "genblox:game:";
 
+function createPlayerFallbackId() {
+  try {
+    if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  } catch { /* use a broadly supported fallback below */ }
+  return `player-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export class PlayroomClient {
   #api;
   #players = new Map();
@@ -24,7 +31,7 @@ export class PlayroomClient {
     });
 
     this.#api.onPlayerJoin((player) => {
-      const id = player.id ?? crypto.randomUUID();
+      const id = player.id ?? createPlayerFallbackId();
       this.#players.set(id, player);
       player.onQuit?.(() => this.#players.delete(id));
     });
