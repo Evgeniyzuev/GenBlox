@@ -20,10 +20,143 @@ export const CLICKER_GAME = Object.freeze({
 export const CLICKER_FILE = serializeGenBloxFile(CLICKER_GAME);
 
 export const TIC_TAC_TOE_GAME = Object.freeze({
-  manifest: { formatVersion: 1, templateId: "tic-tac-toe-remix-1", title: "Tic-Tac-Toe Remix", description: "Play Tic-Tac-Toe against a friendly robot.", mode: "solo", maxPlayers: 1, orientation: "any", sdkVersion: 1 },
-  html: `<main class="game"><p class="kicker">YOUR FIRST REMIX</p><h1>Tic-Tac-Toe</h1><p id="status" aria-live="polite">Your turn — you are X</p><div id="board" class="board" role="grid" aria-label="Tic-Tac-Toe board"></div><div class="score"><span>You <strong id="you">0</strong></span><span>Robot <strong id="bot">0</strong></span></div><button id="again">New round</button><small>Tip: ask AI to use animals, make a bigger board, or add difficulty levels.</small></main>`,
+  manifest: { formatVersion: 1, templateId: "tic-tac-toe-remix-1", title: "Tic-Tac-Toe Remix", description: "Play against a robot locally or another player in a room.", mode: "multiplayer", maxPlayers: 2, orientation: "any", sdkVersion: 1 },
+  html: `<main class="game"><p class="kicker">YOUR FIRST REMIX</p><h1>Tic-Tac-Toe</h1><p id="status" aria-live="polite">Your turn — you are X</p><div id="board" class="board" role="grid" aria-label="Tic-Tac-Toe board"></div><div class="score"><span><span id="x-player">You (X)</span> <strong id="x-score">0</strong></span><span><span id="o-player">Robot (O)</span> <strong id="o-score">0</strong></span></div><button id="again">New round</button><small>Local preview uses a robot. Launch for Room to play on one shared board.</small></main>`,
   css: `*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at top,#302b61,#12111f 62%);color:#f8f7ff;font-family:system-ui,sans-serif}.game{width:min(92vw,520px);text-align:center}.kicker{margin:0;color:#b7f34a;font-size:12px;font-weight:900;letter-spacing:2px}h1{margin:8px 0;font-size:clamp(36px,10vw,62px)}#status{min-height:24px;color:#c6c0db}.board{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:min(82vw,360px);aspect-ratio:1;margin:22px auto}.cell{border:1px solid #ffffff22;background:#211f36;color:#ff668c;font-size:clamp(38px,12vw,72px);font-weight:900;cursor:pointer}.cell[data-mark="O"]{color:#63dcff}.cell:disabled{cursor:default}.score{display:flex;justify-content:center;gap:35px;margin:18px;font-size:18px}.score strong{color:#b7f34a}#again{padding:12px 22px;border:0;background:#b7f34a;color:#171525;font-weight:900;cursor:pointer}small{display:block;margin:18px auto;color:#aaa7bd;line-height:1.5}`,
-  javascript: `const boardEl=document.querySelector('#board');const statusEl=document.querySelector('#status');const again=document.querySelector('#again');const youEl=document.querySelector('#you');const botEl=document.querySelector('#bot');const wins=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];let board,over,you=0,bot=0;function winner(){for(const [a,b,c] of wins)if(board[a]&&board[a]===board[b]&&board[a]===board[c])return board[a];return board.every(Boolean)?'draw':null}function draw(){boardEl.replaceChildren(...board.map((mark,index)=>{const cell=document.createElement('button');cell.className='cell';cell.dataset.mark=mark;cell.textContent=mark;cell.disabled=over||Boolean(mark);cell.setAttribute('aria-label',mark?'Cell '+(index+1)+': '+mark:'Empty cell '+(index+1));cell.onclick=()=>play(index);return cell}))}function finish(result){over=true;if(result==='X'){you++;youEl.textContent=you;statusEl.textContent='You win! 🎉'}else if(result==='O'){bot++;botEl.textContent=bot;statusEl.textContent='The robot wins this round.'}else statusEl.textContent='It is a draw — nice game!';draw();GenBlox.finish({result,score:you})}function check(){const result=winner();if(result)finish(result);return Boolean(result)}function botMove(){if(over)return;const empty=board.map((mark,index)=>mark?null:index).filter(index=>index!==null);const complete=(mark)=>{for(const line of wins){const marks=line.map(index=>board[index]);if(marks.filter(value=>value===mark).length===2&&marks.includes(''))return line[marks.indexOf('')]}return null};const choice=complete('O')??complete('X')??(board[4]===''?4:null)??empty[Math.floor(Math.random()*empty.length)];board[choice]='O';if(!check()){statusEl.textContent='Your turn — you are X';draw()}}function play(index){if(over||board[index])return;board[index]='X';draw();if(check())return;statusEl.textContent='Robot is thinking…';setTimeout(botMove,350)}function reset(){board=Array(9).fill('');over=false;statusEl.textContent='Your turn — you are X';draw()}again.onclick=reset;reset();GenBlox.ready();`,
+  javascript: `const boardEl=document.querySelector('#board');
+const statusEl=document.querySelector('#status');
+const again=document.querySelector('#again');
+const xPlayerEl=document.querySelector('#x-player');
+const oPlayerEl=document.querySelector('#o-player');
+const xScoreEl=document.querySelector('#x-score');
+const oScoreEl=document.querySelector('#o-score');
+const wins=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const emptyBoard=()=>Array(9).fill('');
+let board=emptyBoard(),over=false,you=0,bot=0,match=null,pending=false;
+
+function resultFor(cells){
+  for(const [a,b,c] of wins)if(cells[a]&&cells[a]===cells[b]&&cells[a]===cells[c])return cells[a];
+  return cells.every(Boolean)?'draw':null;
+}
+
+function drawCells(cells,canPlay){
+  boardEl.replaceChildren(...cells.map((mark,index)=>{
+    const cell=document.createElement('button');
+    cell.className='cell';cell.dataset.mark=mark;cell.textContent=mark;
+    cell.disabled=Boolean(mark)||!canPlay(index);
+    cell.setAttribute('aria-label',mark?'Cell '+(index+1)+': '+mark:'Empty cell '+(index+1));
+    cell.onclick=()=>play(index);
+    return cell;
+  }));
+}
+
+function playerName(id,fallback){
+  const player=GenBlox.getPlayers().find(item=>item.id===id);
+  return player?((player.avatar||'')+' '+(player.name||fallback)).trim():fallback;
+}
+
+function validMatch(value){
+  return value&&Array.isArray(value.board)&&value.board.length===9&&value.board.every(mark=>mark===''||mark==='X'||mark==='O')&&
+    (value.turn==='X'||value.turn==='O')&&value.seats&&value.scores;
+}
+
+function freshMatch(previous=null,seats=null){
+  const ids=GenBlox.getPlayers().slice(0,2).map(player=>player.id);
+  return {
+    board:emptyBoard(),turn:'X',result:null,
+    seats:seats||{X:ids[0]||null,O:ids[1]||null},
+    scores:{X:Number(previous?.scores?.X)||0,O:Number(previous?.scores?.O)||0},
+    round:(Number(previous?.round)||0)+1,
+    revision:(Number(previous?.revision)||0)+1
+  };
+}
+
+function reconcileRoom(){
+  if(!GenBlox.isMultiplayer()||!GenBlox.isHost())return;
+  const current=GenBlox.getState('match',null);
+  if(!validMatch(current)){GenBlox.setState('match',freshMatch());return;}
+  const ids=GenBlox.getPlayers().slice(0,2).map(player=>player.id);
+  const connected=new Set(ids);
+  let x=connected.has(current.seats.X)?current.seats.X:null;
+  let o=connected.has(current.seats.O)&&current.seats.O!==x?current.seats.O:null;
+  for(const id of ids){if(!x)x=id;else if(!o&&id!==x)o=id;}
+  if(x!==current.seats.X||o!==current.seats.O)GenBlox.setState('match',freshMatch(current,{X:x,O:o}));
+}
+
+function myMark(current){
+  const id=GenBlox.getPlayer().id;
+  return current?.seats?.X===id?'X':current?.seats?.O===id?'O':null;
+}
+
+function renderRoom(){
+  const current=validMatch(match)?match:null;
+  const mine=current?myMark(current):null;
+  xPlayerEl.textContent=playerName(current?.seats?.X,'Waiting for X')+' (X)';
+  oPlayerEl.textContent=playerName(current?.seats?.O,'Waiting for O')+' (O)';
+  xScoreEl.textContent=String(Number(current?.scores?.X)||0);
+  oScoreEl.textContent=String(Number(current?.scores?.O)||0);
+  again.hidden=!current?.result;
+  again.disabled=!GenBlox.isHost();
+  if(!current){statusEl.textContent='Synchronizing the shared board…';drawCells(emptyBoard(),()=>false);return;}
+  if(!current.seats.O)statusEl.textContent='Waiting for the second room player…';
+  else if(current.result==='draw')statusEl.textContent='It is a draw — nice game!';
+  else if(current.result)statusEl.textContent=playerName(current.seats[current.result],current.result)+' wins! 🎉';
+  else if(!mine)statusEl.textContent='You are watching this round.';
+  else if(current.turn===mine)statusEl.textContent='Your turn — you are '+mine;
+  else statusEl.textContent=playerName(current.seats[current.turn],current.turn)+"'s turn";
+  drawCells(current.board,index=>!pending&&!current.result&&Boolean(current.seats.O)&&current.turn===mine&&!current.board[index]);
+}
+
+function playRoom(index){
+  const latest=GenBlox.getState('match',null);
+  const current=validMatch(latest)?latest:match;
+  const mine=validMatch(current)?myMark(current):null;
+  if(pending||!mine||!current.seats.O||current.result||current.turn!==mine||current.board[index])return;
+  const cells=[...current.board];cells[index]=mine;
+  const result=resultFor(cells);
+  const scores={X:Number(current.scores.X)||0,O:Number(current.scores.O)||0};
+  if(result==='X'||result==='O')scores[result]++;
+  pending=true;
+  GenBlox.setState('match',{...current,board:cells,turn:result?current.turn:(mine==='X'?'O':'X'),result,scores,revision:(Number(current.revision)||0)+1});
+  renderRoom();
+  if(result)GenBlox.finish({result,score:scores[mine]});
+}
+
+function renderSolo(){
+  xPlayerEl.textContent='You (X)';oPlayerEl.textContent='Robot (O)';
+  xScoreEl.textContent=String(you);oScoreEl.textContent=String(bot);again.hidden=false;again.disabled=false;
+  drawCells(board,index=>!over&&!board[index]);
+}
+
+function finishSolo(result){
+  over=true;
+  if(result==='X'){you++;statusEl.textContent='You win! 🎉';}
+  else if(result==='O'){bot++;statusEl.textContent='The robot wins this round.';}
+  else statusEl.textContent='It is a draw — nice game!';
+  renderSolo();GenBlox.finish({result,score:you});
+}
+
+function checkSolo(){const result=resultFor(board);if(result)finishSolo(result);return Boolean(result);}
+function botMove(){
+  if(over)return;
+  const empty=board.map((mark,index)=>mark?null:index).filter(index=>index!==null);
+  const complete=mark=>{for(const line of wins){const marks=line.map(index=>board[index]);if(marks.filter(value=>value===mark).length===2&&marks.includes(''))return line[marks.indexOf('')];}return null;};
+  const choice=complete('O')??complete('X')??(board[4]===''?4:null)??empty[Math.floor(Math.random()*empty.length)];
+  board[choice]='O';if(!checkSolo()){statusEl.textContent='Your turn — you are X';renderSolo();}
+}
+function playSolo(index){if(over||board[index])return;board[index]='X';renderSolo();if(checkSolo())return;statusEl.textContent='Robot is thinking…';setTimeout(botMove,350);}
+function resetSolo(){board=emptyBoard();over=false;statusEl.textContent='Your turn — you are X';renderSolo();}
+function play(index){if(GenBlox.isMultiplayer())playRoom(index);else playSolo(index);}
+
+again.onclick=()=>{
+  if(!GenBlox.isMultiplayer()){resetSolo();return;}
+  if(!GenBlox.isHost()||!validMatch(match))return;
+  pending=true;GenBlox.setState('match',freshMatch(match,match.seats));renderRoom();
+};
+GenBlox.onStateChange(state=>{if(!GenBlox.isMultiplayer())return;match=validMatch(state.match)?state.match:null;pending=false;renderRoom();});
+GenBlox.onPlayersChange(()=>{reconcileRoom();if(GenBlox.isMultiplayer())renderRoom();});
+if(GenBlox.isMultiplayer()){match=GenBlox.getState('match',null);reconcileRoom();renderRoom();}else resetSolo();
+GenBlox.ready();`,
 });
 
 export const TIC_TAC_TOE_FILE = serializeGenBloxFile(TIC_TAC_TOE_GAME);
