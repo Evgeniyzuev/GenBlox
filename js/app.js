@@ -1317,6 +1317,7 @@ function queueComputerMove() {
   }
 
   clearTimeout(computerTimer);
+  computerTimer = null;
   if (mode !== "solo" || !game) return;
   const computerSide = activeGameId === "checkers"
     ? CHECKER_COLORS.WHITE
@@ -1326,6 +1327,7 @@ function queueComputerMove() {
   if (game.winner || game.turn !== computerSide) return;
   elements.gameStatus.textContent = "Computer is thinking...";
   computerTimer = setTimeout(() => {
+    computerTimer = null;
     if (activeGameId === "checkers") {
       const move = chooseCheckersMove(localGame, computerSide);
       if (move) localGame = playCheckersMove(localGame, move.from, move.to, computerSide);
@@ -1658,6 +1660,7 @@ function renderCheckers(game, playerCount, mySide) {
 
 function requestCloseGame() {
   clearTimeout(computerTimer);
+  computerTimer = null;
   if (document.fullscreenElement === elements.gameDialog) document.exitFullscreen?.().catch(() => {});
   if (mode === "room" && client) {
     if (!confirm("End the game and return the whole room to the catalog?")) return;
