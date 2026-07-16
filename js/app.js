@@ -1252,12 +1252,12 @@ function makeReversiMove(index) {
   }
 }
 
-function playDurakAction(action, cardId = null, intent = null) {
+function playDurakAction(action, cardId = null) {
   const game = mode === "solo" ? localGame : client?.getGameState(activeGameId);
   const side = mode === "solo" ? 0 : roomPlayerSide();
   if (!isDurakState(game) || side === null) return;
   let next = game;
-  if (action === "card") next = playDurakCard(game, cardId, side, intent);
+  if (action === "card") next = playDurakCard(game, cardId, side);
   if (action === "pass") next = passDurak(game, side);
   if (action === "take") next = takeDurak(game, side);
   if (next === game) return;
@@ -1302,7 +1302,7 @@ function queueComputerMove() {
       const action = chooseDurakBotAction(current, current.turn);
       if (!action) return;
       let next = current;
-      if (action.type === "card") next = playDurakCard(current, action.cardId, current.turn, action.intent);
+      if (action.type === "card") next = playDurakCard(current, action.cardId, current.turn);
       if (action.type === "pass") next = passDurak(current, current.turn);
       if (action.type === "take") next = takeDurak(current, current.turn);
       if (next === current) return;
@@ -1317,7 +1317,6 @@ function queueComputerMove() {
   }
 
   clearTimeout(computerTimer);
-  computerTimer = null;
   if (mode !== "solo" || !game) return;
   const computerSide = activeGameId === "checkers"
     ? CHECKER_COLORS.WHITE
@@ -1327,7 +1326,6 @@ function queueComputerMove() {
   if (game.winner || game.turn !== computerSide) return;
   elements.gameStatus.textContent = "Computer is thinking...";
   computerTimer = setTimeout(() => {
-    computerTimer = null;
     if (activeGameId === "checkers") {
       const move = chooseCheckersMove(localGame, computerSide);
       if (move) localGame = playCheckersMove(localGame, move.from, move.to, computerSide);
@@ -1581,14 +1579,7 @@ function renderDurak(game, mySeat) {
     button.className = `durak-card ${card.suit === game.trump.suit ? "is-trump" : ""}`;
     button.textContent = cardText(card);
     button.disabled = !legalIds.has(card.id);
-    button.addEventListener("click", () => {
-      const canDefend = actions.defenseCardIds?.includes(card.id);
-      const canTransfer = actions.transferCardIds?.includes(card.id);
-      const intent = canDefend && canTransfer
-        ? (window.confirm("Beat with this card? Press Cancel to transfer the attack.") ? "defend" : "transfer")
-        : canDefend ? "defend" : canTransfer ? "transfer" : null;
-      playDurakAction("card", card.id, intent);
-    });
+    button.addEventListener("click", () => playDurakAction("card", card.id));
     hand.append(button);
   });
   table.append(hand);
@@ -1660,7 +1651,6 @@ function renderCheckers(game, playerCount, mySide) {
 
 function requestCloseGame() {
   clearTimeout(computerTimer);
-  computerTimer = null;
   if (document.fullscreenElement === elements.gameDialog) document.exitFullscreen?.().catch(() => {});
   if (mode === "room" && client) {
     if (!confirm("End the game and return the whole room to the catalog?")) return;
