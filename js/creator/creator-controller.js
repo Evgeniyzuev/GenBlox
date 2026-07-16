@@ -2,6 +2,7 @@ import { GenBloxFormatError, parseGenBloxFile, serializeGenBloxFile } from "./ge
 import { AI_PROMPT, CREATOR_TEMPLATES, TIC_TAC_TOE_FILE } from "./templates.js";
 import { buildPreviewDocument } from "./preview.js";
 import { initOnlineSaving } from "./online-saving.js";
+import { validateCreatorStateWrite } from "./multiplayer.js";
 
 const DRAFT_KEY = "genblox:creator-drafts:v1";
 const TOUR_KEY = "genblox:creator-tour:v1";
@@ -11,13 +12,24 @@ function download(name, text) { const link=document.createElement('a');link.href
 function readDrafts() { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || "[]"); } catch { return []; } }
 function writeDrafts(drafts) { localStorage.setItem(DRAFT_KEY, JSON.stringify(drafts)); }
 
-export function initCreator({ profile = () => ({ name: "Player", avatar: "🙂" }) } = {}) {
+export function initCreator({
+  profile = () => ({ name: "Player", avatar: "🙂" }),
+  multiplayer = null,
+} = {}) {
   const dialog=document.querySelector('#creator-dialog'); if(!dialog) return;
   const text=document.querySelector('#creator-source'), file=document.querySelector('#creator-file'), frame=document.querySelector('#creator-preview');
   const templateSelect=document.querySelector('#creator-template');
   const status=document.querySelector('#creator-status'), details=document.querySelector('#creator-details'), versions=document.querySelector('#creator-versions');
+  const previewMode=document.querySelector('#creator-preview-mode');
   const tour=document.querySelector('#creator-tour'), tourText=document.querySelector('#creator-tour-text'), tourCount=document.querySelector('#creator-tour-count');
   let current=null, currentFilename='tic-tac-toe-remix.genblox.txt', tourIndex=0;
+  const localSharedStates=new Map();
+  const activeTemplateId=()=>current?.manifest?.templateId??'custom';
+  const localSnapshot=()=>{const player=profile();const playerId='local';return{connected:false,isHost:true,playerId,players:[{id:playerId,name:player.name||'Player',avatar:player.avatar||'🙂',isLocal:true}],state:localSharedStates.get(activeTemplateId())??{}};};
+  const multiplayerSnapshot=()=>multiplayer?.getSnapshot?.(activeTemplateId())??localSnapshot();
+  const syncPreview=()=>{if(!dialog.open||!frame.contentWindow)return;const snapshot=multiplayerSnapshot();previewMode.textContent=snapshot.connected?`Room ${snapshot.roomCode||''} · ${snapshot.players.length} player${snapshot.players.length===1?'':'s'}`:'Local preview';frame.contentWindow.postMessage({source:'genblox-host',type:'sync',payload:snapshot},'*');};
+  const sendMultiplayerError=(message)=>frame.contentWindow?.postMessage({source:'genblox-host',type:'multiplayer-error',payload:{message}},'*');
+  const writeSharedState=(key,value)=>{try{const snapshot=multiplayerSnapshot();const write=validateCreatorStateWrite(key,value,snapshot.state);if(snapshot.connected&&multiplayer?.setState)multiplayer.setState(activeTemplateId(),write.key,write.value);else localSharedStates.set(activeTemplateId(),write.state);syncPreview();}catch(error){sendMultiplayerError(error.message);setStatus('Multiplayer state was not saved.','error',error.message);}};
   const syncTemplateIdentity=(game)=>{const entry=Object.entries(CREATOR_TEMPLATES).find(([,item])=>parseGenBloxFile(item.file).manifest.templateId===game.manifest.templateId);if(entry){templateSelect.value=entry[0];currentFilename=entry[1].filename;}};
   const setStatus=(message,kind='ok',detail='')=>{status.textContent=message;status.dataset.kind=kind;details.hidden=!detail;details.replaceChildren();if(detail){const summary=document.createElement('summary');summary.textContent='Details';const copy=document.createElement('p');copy.textContent=detail;details.append(summary,copy);}};
   const renderVersions=()=>{const drafts=readDrafts();versions.replaceChildren(...drafts.map((draft,index)=>{const row=document.createElement('div');row.className='creator-version-row';const openButton=document.createElement('button');openButton.type='button';openButton.className='creator-version';openButton.textContent=`Version ${drafts.length-index} · ${new Date(draft.savedAt).toLocaleString()}`;openButton.onclick=()=>{text.value=draft.source;run(draft.source,false)};const removeButton=document.createElement('button');removeButton.type='button';removeButton.className='creator-version-delete';removeButton.setAttribute('aria-label',`Delete version ${drafts.length-index}`);removeButton.textContent='×';removeButton.onclick=()=>{if(!confirm('Delete this saved version?'))return;const next=readDrafts();next.splice(index,1);writeDrafts(next);renderVersions();setStatus('Saved version deleted.');};row.append(openButton,removeButton);return row;}));document.querySelector('#creator-delete-all').hidden=drafts.length===0;};
@@ -37,8 +49,9 @@ export function initCreator({ profile = () => ({ name: "Player", avatar: "🙂" 
   document.querySelector('#creator-help').onclick=()=>showTour(0); document.querySelector('#creator-tour-prev').onclick=()=>showTour(tourIndex-1); document.querySelector('#creator-tour-next').onclick=()=>tourIndex===steps.length-1?closeTour():showTour(tourIndex+1);
   const closeTour=()=>{tour.hidden=true;localStorage.setItem(TOUR_KEY,'done')}; document.querySelector('#creator-tour-skip').onclick=closeTour;
   file.onchange=async()=>{const picked=file.files?.[0];if(!picked)return;if(picked.size>240000){setStatus('This game file is too big.','error','Ask AI to make it smaller than 240 KB.');return;}text.value=await picked.text();run();file.value='';};
-  window.addEventListener('message',event=>{if(event.source!==frame.contentWindow||event.data?.source!=='genblox-game')return;const {type,payload}=event.data;if(type==='ready')setStatus('Your game is running. Have fun testing it!');if(type==='finish')setStatus(`Game finished${Number.isFinite(payload?.score)?` — score: ${payload.score}`:''}. Change it or share the text with AI.`);if(type==='restart')run(text.value,false);if(type==='error')setStatus('The game stopped because of a code error.','error',`${payload?.message||'Unknown error'}${payload?.line?` (line ${payload.line})`:''}`);});
-  frame.addEventListener('load',()=>{setTimeout(()=>{if(frame.srcdoc&&status.textContent.startsWith('Your game is ready'))setStatus('The preview loaded. If nothing moves, open Details.','ok','The game did not call GenBlox.ready() within the expected time.');},3000)});
+  window.addEventListener('message',event=>{if(event.source!==frame.contentWindow||event.data?.source!=='genblox-game')return;const {type,payload}=event.data;if(type==='ready'){syncPreview();setStatus('Your game is running. Have fun testing it!');}if(type==='set-state')writeSharedState(payload?.key,payload?.value);if(type==='finish')setStatus(`Game finished${Number.isFinite(payload?.score)?` — score: ${payload.score}`:''}. Change it or share the text with AI.`);if(type==='restart')run(text.value,false);if(type==='error')setStatus('The game stopped because of a code error.','error',`${payload?.message||'Unknown error'}${payload?.line?` (line ${payload.line})`:''}`);});
+  frame.addEventListener('load',()=>{syncPreview();setTimeout(()=>{if(frame.srcdoc&&status.textContent.startsWith('Your game is ready'))setStatus('The preview loaded. If nothing moves, open Details.','ok','The game did not call GenBlox.ready() within the expected time.');},3000)});
+  setInterval(syncPreview,150);
   initOnlineSaving({getSource:()=>text.value,loadSource:(source)=>{text.value=source;run(source,false);},setCreatorStatus:setStatus});
   renderVersions();
 }

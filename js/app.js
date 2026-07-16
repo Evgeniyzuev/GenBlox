@@ -48,6 +48,7 @@ import { MicroMachinesGame } from "./games/micromachines.js";
 import { WaveRunnersGame } from "./games/wave-runners.js";
 import { FantasyLanesGame } from "./games/fantasy-lanes.js";
 import { initCreator } from "./creator/creator-controller.js";
+import { normalizeCreatorGameId, validateCreatorStateWrite } from "./creator/multiplayer.js";
 
 const GAMES = {
   "tic-tac-toe": {
@@ -349,6 +350,45 @@ function profileForPlayer(player, fallbackName) {
   if (!raw) return fallbackName;
   const profile = normalizeProfile(raw);
   return `${profile.avatar} ${profile.name}`;
+}
+
+function publicProfileForPlayer(player, fallbackName = "Player") {
+  const raw = player?.getState?.("profile");
+  const safe = raw ? normalizeProfile(raw) : normalizeProfile({ name: fallbackName, avatar: "🙂" });
+  return { id: String(player?.id ?? "unknown"), name: safe.name, avatar: safe.avatar, isLocal: player?.id === client?.playerId };
+}
+
+function creatorMultiplayerSnapshot(templateId) {
+  if (!client?.started) return null;
+  const gameId = normalizeCreatorGameId(templateId);
+  const record = client.getGameState(gameId);
+  const players = client.players.slice(0, client.maxPlayers).map((player, index) => publicProfileForPlayer(player, index === 0 ? "Room Host" : `Player ${index + 1}`));
+  if (!players.some((player) => player.id === client.playerId) && client.localPlayer) {
+    players.unshift(publicProfileForPlayer(client.localPlayer, playerProfile.name));
+  }
+  return {
+    connected: true,
+    roomCode: client.roomCode,
+    isHost: client.isHost,
+    playerId: client.playerId,
+    players,
+    state: record?.kind === "creator-preview" && record.values && typeof record.values === "object" ? record.values : {},
+  };
+}
+
+function setCreatorMultiplayerState(templateId, key, value) {
+  if (!client?.started) return;
+  const gameId = normalizeCreatorGameId(templateId);
+  const previous = client.getGameState(gameId);
+  const currentState = previous?.kind === "creator-preview" && previous.values && typeof previous.values === "object" ? previous.values : {};
+  const write = validateCreatorStateWrite(key, value, currentState);
+  client.setGameState(gameId, {
+    kind: "creator-preview",
+    templateId,
+    values: write.state,
+    updatedBy: client.playerId,
+    revision: (Number(previous?.revision) || 0) + 1,
+  });
 }
 
 function playerByIndex(index) {
@@ -1782,6 +1822,9 @@ elements.gameDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
   requestCloseGame();
 });
+elements.gameDialog.addEventListener("contextmenu", (event) => {
+  if (!event.target.closest("input,textarea,[contenteditable='true']")) event.preventDefault();
+});
 elements.helpDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
   closeOverlay(elements.helpDialog, "help");
@@ -1790,7 +1833,13 @@ window.addEventListener("popstate", handlePopState);
 
 renderPlayerProfile();
 buildBoard("tic-tac-toe");
-initCreator({ profile: () => ({ ...playerProfile }) });
+initCreator({
+  profile: () => ({ ...playerProfile }),
+  multiplayer: {
+    getSnapshot: creatorMultiplayerSnapshot,
+    setState: setCreatorMultiplayerState,
+  },
+});
 
 const invitedCode = roomCodeFromUrl();
 if (invitedCode) {
