@@ -376,6 +376,8 @@ groundAt(x, startY = 0) {
     this.turnTime = TURN_DURATION;
     this.turnResolving = false;
     this.turnSettleTime = 0;
+    this.turnResolveElapsed = 0;
+    this.turnPistolShots = 0;
     this.wind = clamp(this.wind * 0.35 + (Math.random() * 2 - 1) * 78, -100, 100);
     const roster = this.livingTeam(team);
     if (!roster.length) return;
@@ -407,6 +409,27 @@ groundAt(x, startY = 0) {
     this.beginTurn(previous === "player" ? "enemy" : "player");
   }
 
+  startTurnResolution() {
+    if (this.gameMode !== "classic" || this.turnResolving) return;
+    this.turnResolving = true;
+    this.turnSettleTime = 0;
+    this.turnResolveElapsed = 0;
+    this.updateToolbar();
+  }
+
+  updateTurnResolution(dt) {
+    if (!this.turnResolving || this.state !== "playing") return;
+    this.turnResolveElapsed += dt;
+    const actionFinished = this.projectiles.length === 0 && this.meleeAttacks.length === 0;
+    const bodiesSettled = this.allWorms.every(
+      (worm) => !worm.alive || worm.grounded || (Math.abs(worm.vx) < 14 && Math.abs(worm.vy) < 20),
+    );
+    this.turnSettleTime = actionFinished && bodiesSettled ? this.turnSettleTime + dt : 0;
+    // Never let tiny collision jitter or a malformed projectile lock the match forever.
+    const resolvedNormally = actionFinished && (this.turnSettleTime > 0.65 || this.turnResolveElapsed > 3);
+    if (resolvedNormally || this.turnResolveElapsed > 7) this.endTurn();
+  }
+
   canControl(worm) {
     return this.state === "playing"
       && worm?.alive
@@ -427,9 +450,12 @@ groundAt(x, startY = 0) {
     [...this.toolbar.children].forEach((button) => {
       const weapon = WEAPONS.find((item) => item.id === button.dataset.weapon);
       const ammo = worm.ammo[weapon.id];
+      const pistolLimitReached = this.gameMode === "classic" && weapon.id === "pistol" && this.turnPistolShots >= 3;
       button.classList.toggle("is-selected", weapon.id === this.selectedWeapon);
-      button.disabled = ammo !== Infinity && ammo <= 0;
-      button.querySelector("small").textContent = ammo === Infinity ? "∞" : ammo;
+      button.disabled = !this.canControl(worm) || pistolLimitReached || (ammo !== Infinity && ammo <= 0);
+      button.querySelector("small").textContent = this.gameMode === "classic" && weapon.id === "pistol"
+        ? `${ammo} · ${Math.max(0, 3 - this.turnPistolShots)}×`
+        : ammo === Infinity ? "∞" : ammo;
     });
   }
 
@@ -511,6 +537,9 @@ groundAt(x, startY = 0) {
   useWeapon(worm, id, angle) {
     const ammo = worm.ammo[id];
     if (ammo !== Infinity && ammo <= 0) return;
+    const activeClassicWorm = this.gameMode === "classic"
+      && worm === (this.turnTeam === "player" ? this.player : this.enemy);
+    if (activeClassicWorm && id === "pistol" && this.turnPistolShots >= 3) return;
     const direction = { x: Math.cos(angle), y: Math.sin(angle) };
     if (id === "pistol") {
       this.projectiles.push({
@@ -558,9 +587,11 @@ groundAt(x, startY = 0) {
       worm.cooldown = 0.35;
     }
     if (ammo !== Infinity) worm.ammo[id] -= 1;
-    if (this.gameMode === "classic" && worm === (this.turnTeam === "player" ? this.player : this.enemy) && id !== "rope") {
-      this.turnResolving = true;
-      this.turnSettleTime = 0;
+    if (activeClassicWorm && id === "pistol") {
+      this.turnPistolShots += 1;
+      if (this.turnPistolShots >= 3) this.startTurnResolution();
+    } else if (activeClassicWorm && !["dig", "block", "rope"].includes(id)) {
+      this.startTurnResolution();
     }
     if (worm === this.localWorm) this.updateToolbar();
   }
@@ -612,7 +643,7 @@ groundAt(x, startY = 0) {
     if (!this.livingTeam("enemy").length) this.finish(true);
     else if (!this.livingTeam("player").length) this.finish(false);
     else if (this.gameMode === "classic" && (worm === this.player || worm === this.enemy)) {
-      this.turnResolving = true;
+      this.startTurnResolution();
     }
   }
 
@@ -878,14 +909,44 @@ updateWorm(worm, dt, input = 0) {
         const range = attack.weapon === "bat" ? 68 : 48;
         if (d < range && facing > 0.35) {
           const damage = attack.weapon === "bat" ? 22 : 7;
-          const pushX = attack.weapon === "bat" ? 510 : 150;
-          const pushY = attack.weapon === "bat" ? -300 : -75;
-          this.damage(target, damage, Math.cos(attack.angle) * pushX, pushY);
+          if (attack.weapon === "bat") {
+            this.damage(target, damage, Math.cos(attack.angle) * 760, -390);
+          } else {
+            const canPush = target.invulnerable <= 0;
+            this.damage(target, damage, 0, -18);
+            if (canPush && target.alive) {
+              const direction = Math.sign(Math.cos(attack.angle)) || attack.owner.facing;
+              this.shoveWorm(target, direction, target.radius * 2);
+            }
+          }
           this.burst(target.x, target.y, attack.owner.color, 12);
         }
       }
       return attack.age < attack.duration;
     });
+  }
+
+  shoveWorm(worm, direction, pixels) {
+    const stepDirection = Math.sign(direction) || 1;
+    for (let step = 0; step < pixels; step += 1) {
+      const nextX = clamp(worm.x + stepDirection, worm.radius, 960 - worm.radius);
+      if (!this.circleHitsSolid(nextX, worm.y, worm.radius)) {
+        worm.x = nextX;
+        continue;
+      }
+      let climbed = false;
+      for (let rise = 1; rise <= 8; rise += 1) {
+        if (!this.circleHitsSolid(nextX, worm.y - rise, worm.radius)) {
+          worm.x = nextX;
+          worm.y -= rise;
+          climbed = true;
+          break;
+        }
+      }
+      if (!climbed) break;
+    }
+    worm.vx += stepDirection * 45;
+    worm.squash = Math.max(worm.squash, 0.7);
   }
 
   ignite(x, y) {
@@ -1329,7 +1390,7 @@ updateWorm(worm, dt, input = 0) {
     else if (this.gameMode === "classic") {
       if (!this.turnResolving) {
         this.turnTime = Math.max(0, this.turnTime - dt);
-        if (this.turnTime <= 0) this.turnResolving = true;
+        if (this.turnTime <= 0) this.startTurnResolution();
       }
       this.updateAI(dt);
       for (const worm of this.allWorms) {
@@ -1345,12 +1406,7 @@ updateWorm(worm, dt, input = 0) {
       this.updateMeleeAttacks(dt);
       this.updateFire(dt);
       this.updateCrates(dt);
-      if (this.turnResolving && this.state === "playing") {
-        const actionFinished = this.projectiles.length === 0 && this.meleeAttacks.length === 0;
-        const bodiesSettled = this.allWorms.every((worm) => !worm.alive || (Math.abs(worm.vx) < 8 && Math.abs(worm.vy) < 12));
-        this.turnSettleTime = actionFinished && bodiesSettled ? this.turnSettleTime + dt : 0;
-        if (this.turnSettleTime > 1.1) this.endTurn();
-      }
+      this.updateTurnResolution(dt);
     } else {
       this.adjustRope(this.player, ropeDelta, dt);
       this.updateWorm(this.player, dt, input);

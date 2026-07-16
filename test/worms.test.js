@@ -128,3 +128,82 @@ test("classic team scene renders without depending on a single-worm duel", () =>
 
   assert.doesNotThrow(() => game.draw());
 });
+
+test("utility tools keep the turn and the third pistol shot ends it", () => {
+  const game = logicGame();
+  const worm = game.createWorm(120, "pink", "P1", "player");
+  game.playerTeam = [worm];
+  game.enemyTeam = [game.createWorm(800, "blue", "B1", "enemy")];
+  [game.player, game.enemy] = [worm, game.enemyTeam[0]];
+  game.player.y = game.enemy.y = 100;
+  game.projectiles = [];
+  game.meleeAttacks = [];
+  game.firePatches = [];
+  game.turnTeam = "player";
+  game.turnPistolShots = 0;
+  game.turnResolving = false;
+
+  game.useWeapon(worm, "dig", 0);
+  game.useWeapon(worm, "block", 0);
+  game.useWeapon(worm, "rope", -0.5);
+  assert.equal(game.turnResolving, false);
+
+  game.useWeapon(worm, "pistol", 0);
+  game.useWeapon(worm, "pistol", 0);
+  assert.equal(game.turnResolving, false);
+  assert.equal(game.turnPistolShots, 2);
+
+  game.useWeapon(worm, "pistol", 0);
+  assert.equal(game.turnResolving, true);
+  assert.equal(game.turnPistolShots, 3);
+});
+
+test("turn resolution cannot hang on a constantly moving body", () => {
+  const game = logicGame();
+  game.playerTeam = [game.createWorm(120, "pink", "P1", "player")];
+  game.enemyTeam = [game.createWorm(800, "blue", "B1", "enemy")];
+  [game.player, game.enemy] = [game.playerTeam[0], game.enemyTeam[0]];
+  game.playerIndex = 0;
+  game.enemyIndex = 0;
+  game.turnTeam = "player";
+  game.turnNumber = 1;
+  game.turnResolving = true;
+  game.turnResolveElapsed = 0;
+  game.turnSettleTime = 0;
+  game.projectiles = [];
+  game.meleeAttacks = [];
+  game.player.vx = 100;
+  game.player.vy = 100;
+
+  game.updateTurnResolution(3.1);
+
+  assert.equal(game.turnTeam, "enemy");
+  assert.equal(game.turnResolving, false);
+});
+
+test("bat launches hard while finger shoves by about one worm diameter", () => {
+  const batGame = logicGame();
+  const batter = batGame.createWorm(100, "pink", "P1", "player");
+  const batTarget = batGame.createWorm(140, "blue", "B1", "enemy");
+  batGame.playerTeam = [batter];
+  batGame.enemyTeam = [batTarget];
+  [batGame.player, batGame.enemy] = [batter, batTarget];
+  batGame.meleeAttacks = [{ owner: batter, angle: 0, age: 0, duration: 0.4, strikeAt: 0, weapon: "bat", struck: false }];
+
+  batGame.updateMeleeAttacks(0.05);
+  assert.ok(batTarget.vx >= 750);
+  assert.ok(batTarget.vy <= -380);
+
+  const fingerGame = logicGame();
+  const fingerer = fingerGame.createWorm(100, "pink", "P1", "player");
+  const fingerTarget = fingerGame.createWorm(140, "blue", "B1", "enemy");
+  fingerGame.playerTeam = [fingerer];
+  fingerGame.enemyTeam = [fingerTarget];
+  [fingerGame.player, fingerGame.enemy] = [fingerer, fingerTarget];
+  fingerGame.meleeAttacks = [{ owner: fingerer, angle: 0, age: 0, duration: 0.3, strikeAt: 0, weapon: "finger", struck: false }];
+  const startX = fingerTarget.x;
+
+  fingerGame.updateMeleeAttacks(0.05);
+  assert.ok(fingerTarget.x - startX >= fingerTarget.radius * 1.8);
+  assert.ok(fingerTarget.x - startX <= fingerTarget.radius * 2);
+});
