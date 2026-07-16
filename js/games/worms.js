@@ -1,6 +1,9 @@
 const TAU = Math.PI * 2;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const TURN_DURATION = 35;
+const WORLD_ZOOM = 0.86;
+const TEAM_SIZE = 5;
 
 const WEAPONS = [
   { id: "pistol", icon: "⌁", label: "Pistol", ammo: 8 },
@@ -48,6 +51,7 @@ export class WormsGame {
     this.pointers = new Map();
     this.running = true;
     this.state = "maps";
+    this.gameMode = this.networkRole === "solo" ? "classic" : "simultaneous";
     this.selectedWeapon = "pistol";
     this.lastTime = performance.now();
     this.networkClock = 0;
@@ -68,8 +72,29 @@ export class WormsGame {
   buildMapChoice() {
     const heading = document.createElement("div");
     heading.className = "worms-map-heading";
-    heading.innerHTML = "<small>CHOOSE ARENA</small><strong>Three maps. One chance.</strong>";
+    heading.innerHTML = "<small>CHOOSE MODE AND ARENA</small><strong>How do we fight?</strong>";
     this.mapChoice.append(heading);
+    const modes = document.createElement("div");
+    modes.className = "worms-mode-choice";
+    const modeItems = this.networkRole === "solo"
+      ? [
+        ["classic", "Classic turns", "5 vs 5 · 35 seconds · like Armageddon"],
+        ["simultaneous", "Real-time chaos", "1 vs 1 · both move at once"],
+      ]
+      : [["simultaneous", "Network duel", "Both players move at once"]];
+    for (const [id, title, subtitle] of modeItems) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.mode = id;
+      button.innerHTML = `<strong>${title}</strong><small>${subtitle}</small>`;
+      button.classList.toggle("is-selected", id === this.gameMode);
+      button.addEventListener("click", () => {
+        this.gameMode = id;
+        [...modes.children].forEach((item) => item.classList.toggle("is-selected", item === button));
+      });
+      modes.append(button);
+    }
+    this.mapChoice.append(modes);
     MAPS.forEach((map) => {
       const button = document.createElement("button");
       button.type = "button";
@@ -124,6 +149,13 @@ export class WormsGame {
     this.mapChoice.hidden = true;
     this.toolbar.hidden = false;
     this.time = 0;
+    this.wind = (Math.random() * 2 - 1) * 92;
+    this.turnTeam = "player";
+    this.turnNumber = 1;
+    this.turnTime = TURN_DURATION;
+    this.turnResolving = false;
+    this.turnSettleTime = 0;
+    this.aiPlan = null;
     this.crateClock = 22;
     this.projectiles = [];
     this.meleeAttacks = [];
@@ -136,10 +168,33 @@ export class WormsGame {
     this.message = "FIGHT!";
     this.messageTime = 1.2;
     this.terrain = this.createTerrain(mapId);
-    this.player = this.createWorm(130, "#ff668c", "You");
-    this.enemy = this.createWorm(830, "#63dcff", "Bot");
-    this.player.y = this.groundAt(this.player.x) - this.player.radius;
-    this.enemy.y = this.groundAt(this.enemy.x) - this.enemy.radius;
+    if (this.gameMode === "classic" && this.networkRole === "solo") {
+      const playerSpawns = Array.from({ length: TEAM_SIZE }, (_, index) => 80 + index * 180);
+      const enemySpawns = Array.from({ length: TEAM_SIZE }, (_, index) => 170 + index * 180);
+      const occupied = [];
+      const spawnTeam = (spawns, color, prefix, team) => spawns.map((preferredX, index) => {
+        const x = this.findSafeSpawn(preferredX, occupied);
+        occupied.push(x);
+        return this.createWorm(x, color, `${prefix} ${index + 1}`, team);
+      });
+      this.playerTeam = spawnTeam(playerSpawns, "#ff668c", "Pink", "player");
+      this.enemyTeam = spawnTeam(enemySpawns, "#63dcff", "Blue", "enemy");
+      [...this.playerTeam, ...this.enemyTeam].forEach((worm) => {
+        worm.y = this.groundAt(worm.x) - worm.radius;
+      });
+      this.playerIndex = 0;
+      this.enemyIndex = 0;
+      this.player = this.playerTeam[0];
+      this.enemy = this.enemyTeam[0];
+      this.beginTurn("player");
+    } else {
+      this.playerTeam = [this.createWorm(130, "#ff668c", "You", "player")];
+      this.enemyTeam = [this.createWorm(830, "#63dcff", "Bot", "enemy")];
+      this.player = this.playerTeam[0];
+      this.enemy = this.enemyTeam[0];
+      this.player.y = this.groundAt(this.player.x) - this.player.radius;
+      this.enemy.y = this.groundAt(this.enemy.x) - this.enemy.radius;
+    }
     this.updateToolbar();
     const local = this.localWorm;
     if (this.networkRole === "guest") {
@@ -148,19 +203,31 @@ export class WormsGame {
     } else if (this.networkRole === "host") {
       this.enemy.name = "Opponent";
     }
-    this.callbacks.onStatus?.("120 HP · destroy the opponent worm");
+    this.callbacks.onStatus?.(this.gameMode === "classic"
+      ? "Classic turns · 5 worms per team · 35 seconds"
+      : "120 HP · destroy the opponent worm");
     if (publish && this.networkRole === "host") this.publishSnapshot();
   }
 
-  createWorm(x, color, name) {
+  createWorm(x, color, name, team = "player") {
     return {
       x, y: 100, vx: 0, vy: 0, radius: 16, color, name,
-      hp: 120, armor: 0, grounded: false, facing: x < 480 ? 1 : -1,
+      team, hp: this.gameMode === "classic" ? 100 : 120, armor: 0, alive: true,
+      grounded: false, facing: x < 480 ? 1 : -1,
       aim: x < 480 ? -0.35 : Math.PI + 0.35, cooldown: 0, invulnerable: 0,
-      lavaExposure: 0, fireExposure: 0, hurtTime: 0, hurtTilt: 0,
+      lavaExposure: 0, fireExposure: 0, hurtTime: 0, hurtTilt: 0, animTime: Math.random() * 10,
+      bodyAngle: 0, angularVelocity: 0, squash: 0, blinkClock: 1 + Math.random() * 3,
       ammo: Object.fromEntries(WEAPONS.map((item) => [item.id, item.ammo])),
       rope: null,
     };
+  }
+
+  get allWorms() {
+    return [...(this.playerTeam ?? (this.player ? [this.player] : [])), ...(this.enemyTeam ?? (this.enemy ? [this.enemy] : []))];
+  }
+
+  livingTeam(team) {
+    return (team === "player" ? this.playerTeam : this.enemyTeam).filter((worm) => worm.alive && worm.hp > 0);
   }
 
   createTerrain(mapId) {
@@ -284,6 +351,17 @@ groundAt(x, startY = 0) {
   return ground;
 }
 
+  findSafeSpawn(preferredX, occupied = []) {
+    for (let offset = 0; offset <= 270; offset += 15) {
+      for (const direction of offset === 0 ? [1] : [1, -1]) {
+        const x = clamp(preferredX + offset * direction, 24, 936);
+        const ground = this.groundAt(x);
+        if (ground < 505 && occupied.every((taken) => Math.abs(taken - x) > 42)) return x;
+      }
+    }
+    return clamp(preferredX, 24, 936);
+  }
+
   get localWorm() {
     return this.networkRole === "guest" ? this.enemy : this.player;
   }
@@ -292,8 +370,51 @@ groundAt(x, startY = 0) {
     return this.networkRole === "guest" ? this.player : this.enemy;
   }
 
+  beginTurn(team) {
+    if (this.gameMode !== "classic") return;
+    this.turnTeam = team;
+    this.turnTime = TURN_DURATION;
+    this.turnResolving = false;
+    this.turnSettleTime = 0;
+    this.wind = clamp(this.wind * 0.35 + (Math.random() * 2 - 1) * 78, -100, 100);
+    const roster = this.livingTeam(team);
+    if (!roster.length) return;
+    const indexKey = team === "player" ? "playerIndex" : "enemyIndex";
+    const teamList = team === "player" ? this.playerTeam : this.enemyTeam;
+    let index = this[indexKey] % teamList.length;
+    while (!teamList[index].alive) index = (index + 1) % teamList.length;
+    this[indexKey] = index;
+    if (team === "player") this.player = teamList[index];
+    else this.enemy = teamList[index];
+    const active = team === "player" ? this.player : this.enemy;
+    active.rope = null;
+    active.cooldown = 0;
+    this.aiPlan = null;
+    this.message = team === "player" ? "YOUR TURN" : "BLUE TEAM";
+    this.messageTime = 1;
+    this.updateToolbar();
+  }
+
+  endTurn() {
+    if (this.gameMode !== "classic" || this.state !== "playing") return;
+    const previous = this.turnTeam;
+    const indexKey = previous === "player" ? "playerIndex" : "enemyIndex";
+    const teamList = previous === "player" ? this.playerTeam : this.enemyTeam;
+    const previousWorm = previous === "player" ? this.player : this.enemy;
+    previousWorm.rope = null;
+    this[indexKey] = (this[indexKey] + 1) % teamList.length;
+    this.turnNumber += 1;
+    this.beginTurn(previous === "player" ? "enemy" : "player");
+  }
+
+  canControl(worm) {
+    return this.state === "playing"
+      && worm?.alive
+      && (this.gameMode !== "classic" || (this.turnTeam === "player" && !this.turnResolving && worm === this.player));
+  }
+
   selectWeapon(id) {
-    if (this.state !== "playing") return;
+    if (!this.canControl(this.localWorm)) return;
     this.selectedWeapon = id;
     this.localInput.weapon = id;
     if (this.networkRole === "guest") this.sendNetworkInput(true);
@@ -321,7 +442,7 @@ groundAt(x, startY = 0) {
   }
 
   pointerDown(event) {
-    if (this.state !== "playing") return;
+    if (!this.canControl(this.localWorm)) return;
     this.canvas.setPointerCapture(event.pointerId);
     const point = this.pointerPosition(event);
     let side;
@@ -351,6 +472,7 @@ groundAt(x, startY = 0) {
 
   setAimFromPointer(point, pointer = point) {
     const worm = this.localWorm;
+    if (!this.canControl(worm)) return;
     const dx = point.x - pointer.startX;
     const dy = point.y - pointer.startY;
     if (Math.hypot(dx, dy) < 8) return;
@@ -361,6 +483,7 @@ groundAt(x, startY = 0) {
 
   jump() {
     const worm = this.localWorm;
+    if (!this.canControl(worm)) return;
     if (this.networkRole === "guest") {
       this.localInput.jumpSeq += 1;
       this.sendNetworkInput(true);
@@ -374,7 +497,7 @@ groundAt(x, startY = 0) {
 
   fire() {
     const worm = this.localWorm;
-    if (this.state !== "playing" || worm.cooldown > 0) return;
+    if (!this.canControl(worm) || worm.cooldown > 0) return;
     if (this.networkRole === "guest") {
       this.localInput.fireSeq += 1;
       this.localInput.weapon = this.selectedWeapon;
@@ -435,12 +558,19 @@ groundAt(x, startY = 0) {
       worm.cooldown = 0.35;
     }
     if (ammo !== Infinity) worm.ammo[id] -= 1;
+    if (this.gameMode === "classic" && worm === (this.turnTeam === "player" ? this.player : this.enemy) && id !== "rope") {
+      this.turnResolving = true;
+      this.turnSettleTime = 0;
+    }
     if (worm === this.localWorm) this.updateToolbar();
   }
 
   hitscan(worm, angle) {
     const direction = { x: Math.cos(angle), y: Math.sin(angle) };
-    const target = worm === this.player ? this.enemy : this.player;
+    const target = this.allWorms
+      .filter((candidate) => candidate !== worm && candidate.alive)
+      .sort((a, b) => distance(worm, a) - distance(worm, b))[0];
+    if (!target) return;
     const toTarget = { x: target.x - worm.x, y: target.y - worm.y };
     const projection = toTarget.x * direction.x + toTarget.y * direction.y;
     const closest = Math.abs(toTarget.x * direction.y - toTarget.y * direction.x);
@@ -453,26 +583,49 @@ groundAt(x, startY = 0) {
   }
 
   damage(worm, amount, vx = 0, vy = 0) {
-    if (worm.invulnerable > 0 || this.state !== "playing") return;
+    if (!worm?.alive || worm.invulnerable > 0 || this.state !== "playing") return;
     const absorbed = Math.min(worm.armor, Math.round(amount * 0.6));
     worm.armor -= absorbed;
     worm.hp = Math.max(0, worm.hp - (amount - absorbed));
     worm.vx += vx;
     worm.vy += vy;
+    worm.angularVelocity += clamp(vx * 0.012 + (Math.random() - 0.5) * 5, -8, 8);
+    worm.squash = 1;
     worm.invulnerable = 0.2;
     worm.hurtTime = 0.58;
     worm.hurtTilt = (Math.random() - 0.5) * 0.9;
-    if (worm.hp <= 0) this.finish(worm === this.enemy);
+    this.particles.push({
+      type: "text", x: worm.x, y: worm.y - 24, vx: vx * 0.05, vy: -48,
+      text: `-${amount - absorbed}`, life: 0.9, maxLife: 0.9, color: "#fff3ad",
+    });
+    this.burst(worm.x, worm.y, worm.color, 8);
+    if (worm.hp <= 0) this.killWorm(worm);
+  }
+
+  killWorm(worm) {
+    if (!worm.alive) return;
+    worm.alive = false;
+    worm.hp = 0;
+    worm.rope = null;
+    worm.deathTime = 1.7;
+    this.burst(worm.x, worm.y, "#ffffff", 24);
+    if (!this.livingTeam("enemy").length) this.finish(true);
+    else if (!this.livingTeam("player").length) this.finish(false);
+    else if (this.gameMode === "classic" && (worm === this.player || worm === this.enemy)) {
+      this.turnResolving = true;
+    }
   }
 
   explode(x, y, radius = 55, damage = 34) {
     this.crater(x, y, radius);
-    [this.player, this.enemy].forEach((worm) => {
+    this.allWorms.forEach((worm) => {
+      if (!worm.alive) return;
       const d = distance(worm, { x, y });
       if (d < radius + worm.radius) {
         const force = 1 - d / (radius + worm.radius);
         const nx = (worm.x - x) / Math.max(d, 1);
-        this.damage(worm, Math.round(damage * clamp(force, 0.35, 1)), nx * 390 * force, -250 * force);
+        const ny = (worm.y - y) / Math.max(d, 1);
+        this.damage(worm, Math.round(damage * clamp(force, 0.35, 1)), nx * 520 * force, ny * 260 * force - 285 * force);
       }
     });
     this.blocks = this.blocks.filter((block) => distance({ x: block.x + 22, y: block.y + 17 }, { x, y }) > radius);
@@ -507,6 +660,14 @@ groundAt(x, startY = 0) {
   }
 
 updateWorm(worm, dt, input = 0) {
+  if (!worm.alive) {
+    worm.deathTime = Math.max(0, (worm.deathTime ?? 0) - dt);
+    return;
+  }
+  worm.animTime += dt;
+  worm.blinkClock -= dt;
+  if (worm.blinkClock < -0.13) worm.blinkClock = 1.8 + Math.random() * 3.6;
+  worm.squash = Math.max(0, worm.squash - dt * 3.4);
   worm.cooldown = Math.max(0, worm.cooldown - dt);
   worm.invulnerable = Math.max(0, worm.invulnerable - dt);
   worm.hurtTime = Math.max(0, (worm.hurtTime ?? 0) - dt);
@@ -514,6 +675,9 @@ updateWorm(worm, dt, input = 0) {
   worm.vx *= Math.pow(worm.grounded ? 0.001 : 0.12, dt);
   worm.vx = clamp(worm.vx, -145, 145);
   worm.vy += 720 * dt;
+  worm.bodyAngle += worm.angularVelocity * dt;
+  worm.angularVelocity *= Math.pow(worm.grounded ? 0.003 : 0.55, dt);
+  if (worm.grounded && worm.hurtTime <= 0) worm.bodyAngle *= Math.pow(0.0005, dt);
   if (worm.rope) {
     const dx = worm.x - worm.rope.x;
     const dy = worm.y - worm.rope.y;
@@ -599,7 +763,10 @@ updateWorm(worm, dt, input = 0) {
     worm.y = safeY;
     worm.vy = 0;
     worm.grounded = direction > 0;
-    if (direction > 0 && impact > 520) this.damage(worm, Math.round((impact - 500) / 13));
+    if (direction > 0) {
+      if (impact > 240) worm.squash = clamp((impact - 200) / 420, 0.25, 1);
+      if (impact > 520) this.damage(worm, Math.round((impact - 500) / 13));
+    }
   } else {
     worm.y = candidateY;
     // Проверяем grounded более тщательно
@@ -635,14 +802,13 @@ updateWorm(worm, dt, input = 0) {
       worm.hp = Math.max(0, worm.hp - 1);
       worm.hurtTime = 0.45;
       worm.hurtTilt = (Math.random() - 0.5) * 0.7;
-      if (worm.hp <= 0) this.finish(worm === this.enemy);
+      if (worm.hp <= 0) this.killWorm(worm);
     }
   } else {
     worm.lavaExposure = 0;
   }
   if (worm.y > 560) {
-    worm.hp = 0;
-    this.finish(worm === this.enemy);
+    this.killWorm(worm);
   }
 }
 
@@ -654,6 +820,8 @@ updateWorm(worm, dt, input = 0) {
         : projectile.type === "bullet"
           ? 0
           : 70;
+      const windFactor = projectile.type === "bullet" ? 0.12 : projectile.type === "rocket" ? 0.8 : 1.15;
+      projectile.vx += this.wind * windFactor * dt;
       projectile.vy += gravity * dt;
       projectile.x += projectile.vx * dt;
       projectile.y += projectile.vy * dt;
@@ -665,8 +833,8 @@ updateWorm(worm, dt, input = 0) {
         projectile.vy *= -0.48;
         projectile.vx *= 0.72;
       }
-      const target = [this.player, this.enemy].find(
-        (worm) => worm !== projectile.owner && distance(worm, projectile) < worm.radius + projectile.radius,
+      const target = this.allWorms.find(
+        (worm) => worm.alive && worm !== projectile.owner && distance(worm, projectile) < worm.radius + projectile.radius,
       );
       const touchesGround = this.isTerrainSolid(projectile.x, projectile.y)
         || this.isBlockSolid(projectile.x, projectile.y);
@@ -699,7 +867,10 @@ updateWorm(worm, dt, input = 0) {
       attack.age += dt;
       if (!attack.struck && attack.age >= attack.strikeAt) {
         attack.struck = true;
-        const target = attack.owner === this.player ? this.enemy : this.player;
+        const target = this.allWorms
+          .filter((worm) => worm !== attack.owner && worm.alive)
+          .sort((a, b) => distance(attack.owner, a) - distance(attack.owner, b))[0];
+        if (!target) return attack.age < attack.duration;
         const dx = target.x - attack.owner.x;
         const dy = target.y - attack.owner.y;
         const d = Math.hypot(dx, dy);
@@ -744,7 +915,8 @@ updateWorm(worm, dt, input = 0) {
       }
       return patch.life > 0;
     });
-    for (const worm of [this.player, this.enemy]) {
+    for (const worm of this.allWorms) {
+      if (!worm.alive) continue;
       const burning = this.firePatches.some((patch) => distance(worm, patch) < worm.radius + 18);
       if (!burning) {
         worm.fireExposure = 0;
@@ -759,21 +931,114 @@ updateWorm(worm, dt, input = 0) {
   }
 
   updateAI(dt) {
-    if (!this.enemy || this.state !== "playing") return;
-    const dx = this.player.x - this.enemy.x;
-    const safeDistance = Math.abs(dx) > 230;
-    const direction = safeDistance ? Math.sign(dx) : -Math.sign(dx);
-    this.updateWorm(this.enemy, dt, direction * 0.5);
-    this.enemy.facing = Math.sign(dx);
-    this.enemy.aim = Math.atan2(this.player.y - this.enemy.y - 18, dx);
-    if (this.enemy.grounded && Math.random() < dt * 0.24) this.enemy.vy = -265;
-    if (this.enemy.cooldown <= 0 && Math.random() < dt * 0.7 && Math.abs(dx) < 600) {
-      const spread = (Math.random() - 0.5) * 0.16;
-      const weapon = Math.abs(dx) < 55
-        ? this.enemy.ammo.bat > 0 ? "bat" : "finger"
-        : this.enemy.ammo.rocket > 0 && Math.random() < 0.28 ? "rocket" : "pistol";
-      this.useWeapon(this.enemy, weapon, this.enemy.aim + spread);
+    if (!this.enemy?.alive || this.state !== "playing") return;
+    if (this.gameMode === "classic" && (this.turnTeam !== "enemy" || this.turnResolving)) return;
+    const bot = this.enemy;
+    if (!this.aiPlan || !this.aiPlan.target?.alive) this.aiPlan = this.makeAIPlan(bot);
+    const plan = this.aiPlan;
+    const target = plan.target;
+    plan.age += dt;
+    const dx = target.x - bot.x;
+    const distanceToTarget = Math.abs(dx);
+    const ranged = ["pistol", "rocket", "grenade", "molotov"].some((id) => bot.ammo[id] === Infinity || bot.ammo[id] > 0);
+    const atPosition = Math.abs(plan.destinationX - bot.x) < 16;
+    let move = atPosition ? 0 : Math.sign(plan.destinationX - bot.x) * 0.72;
+    if (!ranged || plan.weapon === "bat" || plan.weapon === "finger") move = distanceToTarget > 44 ? Math.sign(dx) * 0.9 : 0;
+    if (this.gameMode !== "classic") this.updateWorm(bot, dt, move);
+    else bot.aiMove = move;
+    if (move) bot.facing = Math.sign(move);
+
+    const aheadX = clamp(bot.x + Math.sign(move || dx) * 24, 20, 940);
+    const obstacle = this.groundAt(aheadX, Math.max(0, bot.y - 24)) < bot.y + bot.radius - 3;
+    const gap = this.groundAt(aheadX, bot.y) > bot.y + 55;
+    if (bot.grounded && move && (obstacle || gap || bot.aiStuckX === Math.round(bot.x))) {
+      bot.vy = -285;
+      bot.grounded = false;
     }
+    bot.aiStuckX = Math.random() < dt * 2 ? Math.round(bot.x) : bot.aiStuckX;
+
+    bot.aim = this.findAIAim(bot, target, plan.weapon);
+    bot.facing = Math.cos(bot.aim) >= 0 ? 1 : -1;
+    const canStrike = (plan.weapon === "bat" || plan.weapon === "finger") ? distanceToTarget < 62 : true;
+    const shouldFire = plan.age > 0.8 && canStrike && (atPosition || plan.age > 3.8 || this.turnTime < 8);
+    if (shouldFire && bot.cooldown <= 0) {
+      this.useWeapon(bot, plan.weapon, bot.aim + (Math.random() - 0.5) * 0.045);
+      this.aiPlan = null;
+    }
+  }
+
+  makeAIPlan(bot) {
+    const enemies = this.livingTeam("player");
+    const target = enemies.reduce((best, worm) => {
+      const score = distance(bot, worm) + worm.hp * 1.4 - (bot.y - worm.y) * 0.25;
+      return !best || score < best.score ? { worm, score } : best;
+    }, null)?.worm ?? this.player;
+    const d = distance(bot, target);
+    let weapon = "finger";
+    if (d < 68 && bot.ammo.bat > 0) weapon = "bat";
+    else if (d > 115 && bot.ammo.rocket > 0) weapon = "rocket";
+    else if (d > 85 && bot.ammo.grenade > 0 && target.y > bot.y - 35) weapon = "grenade";
+    else if (bot.ammo.pistol > 0) weapon = "pistol";
+    else if (bot.ammo.molotov > 0) weapon = "molotov";
+    else if (bot.ammo.bat > 0) weapon = "bat";
+
+    const desiredRange = weapon === "bat" || weapon === "finger" ? 42 : weapon === "molotov" ? 150 : 260;
+    let destinationX = bot.x;
+    let bestScore = -Infinity;
+    for (let x = clamp(bot.x - 210, 24, 936); x <= clamp(bot.x + 210, 24, 936); x += 30) {
+      const y = this.groundAt(x) - bot.radius;
+      const range = Math.abs(target.x - x);
+      const heightAdvantage = target.y - y;
+      const clearShot = this.hasLineOfSight({ x, y }, target) ? 1 : 0;
+      const lavaRisk = y > 480 ? 400 : 0;
+      const travelCost = Math.abs(x - bot.x) * 0.18;
+      const rangeScore = -Math.abs(range - desiredRange) * (weapon === "bat" || weapon === "finger" ? 1.7 : 0.35);
+      const crateBonus = this.crates.some((crate) => Math.abs(crate.x - x) < 40 && (bot.hp < 55 || crate.type === "ammo")) ? 90 : 0;
+      const score = rangeScore + heightAdvantage * 0.85 + clearShot * 80 + crateBonus - lavaRisk - travelCost;
+      if (score > bestScore) {
+        bestScore = score;
+        destinationX = x;
+      }
+    }
+    return { target, weapon, destinationX, age: 0 };
+  }
+
+  hasLineOfSight(from, to) {
+    const d = distance(from, to);
+    const steps = Math.max(2, Math.ceil(d / 12));
+    for (let index = 2; index < steps - 1; index += 1) {
+      const t = index / steps;
+      if (this.isTerrainSolid(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t)) return false;
+    }
+    return true;
+  }
+
+  findAIAim(bot, target, weapon) {
+    if (weapon === "bat" || weapon === "finger") return Math.atan2(target.y - bot.y, target.x - bot.x);
+    const speed = weapon === "rocket" ? 430 : weapon === "pistol" ? 330 : 300;
+    const gravity = weapon === "grenade" || weapon === "molotov" ? 610 : weapon === "pistol" ? 0 : 70;
+    const windFactor = weapon === "pistol" ? 0.12 : weapon === "rocket" ? 0.8 : 1.15;
+    const facingBase = target.x >= bot.x ? 0 : Math.PI;
+    let best = { angle: Math.atan2(target.y - bot.y, target.x - bot.x), miss: Infinity };
+    for (let index = 0; index <= 46; index += 1) {
+      const lift = -1.35 + index / 46 * 2.15;
+      const angle = facingBase === 0 ? lift : Math.PI - lift;
+      let x = bot.x + Math.cos(angle) * 23;
+      let y = bot.y + Math.sin(angle) * 23;
+      let vx = Math.cos(angle) * speed;
+      let vy = Math.sin(angle) * speed - ((weapon === "grenade" || weapon === "molotov") ? 80 : 0);
+      let miss = Infinity;
+      for (let step = 0; step < 75; step += 1) {
+        vx += this.wind * windFactor * 0.045;
+        vy += gravity * 0.045;
+        x += vx * 0.045;
+        y += vy * 0.045;
+        miss = Math.min(miss, Math.hypot(x - target.x, y - target.y));
+        if (this.isTerrainSolid(x, y) || x < 0 || x > 960 || y > 540) break;
+      }
+      if (miss < best.miss) best = { angle, miss };
+    }
+    return best.angle;
   }
 
   updateCrates(dt) {
@@ -793,9 +1058,10 @@ updateWorm(worm, dt, input = 0) {
         crate.y = ground - 13;
         crate.vy = 0;
       }
-      for (const worm of [this.player, this.enemy]) {
+      for (const worm of this.allWorms) {
+        if (!worm.alive) continue;
         if (distance(crate, worm) < 32) {
-          if (crate.type === "health") worm.hp = Math.min(120, worm.hp + 30);
+          if (crate.type === "health") worm.hp = Math.min(this.gameMode === "classic" ? 100 : 120, worm.hp + 30);
           else if (crate.type === "armor") worm.armor = Math.min(50, worm.armor + 30);
           else {
             worm.ammo.pistol += 3;
@@ -827,7 +1093,7 @@ updateWorm(worm, dt, input = 0) {
       this.state = "maps";
       this.mapChoice.hidden = false;
       this.toolbar.hidden = true;
-      this.callbacks.onStatus?.("Choose one of three maps");
+      this.callbacks.onStatus?.("Choose a mode and arena");
       if (this.networkRole === "host") {
         this.network.publish?.({ kind: "worms", phase: "selecting", revision: Date.now() });
       }
@@ -850,6 +1116,8 @@ updateWorm(worm, dt, input = 0) {
       facing: worm.facing, aim: worm.aim, cooldown: worm.cooldown,
       lavaExposure: worm.lavaExposure, fireExposure: worm.fireExposure,
       hurtTime: worm.hurtTime, hurtTilt: worm.hurtTilt,
+      alive: worm.alive, deathTime: worm.deathTime ?? 0,
+      bodyAngle: worm.bodyAngle, angularVelocity: worm.angularVelocity, squash: worm.squash,
       ammo: Object.fromEntries(
         Object.entries(worm.ammo).map(([key, value]) => [key, value === Infinity ? -1 : value]),
       ),
@@ -877,6 +1145,7 @@ updateWorm(worm, dt, input = 0) {
       phase: this.state,
       mapId: this.mapId,
       tick: Math.round(this.time * 60),
+      wind: this.wind,
       revision: Date.now(),
       player: this.serializeWorm(this.player),
       enemy: this.serializeWorm(this.enemy),
@@ -935,6 +1204,7 @@ updateWorm(worm, dt, input = 0) {
     }
     this.appliedTerrainEvents = events.length;
     this.time = (snapshot.tick ?? 0) / 60;
+    this.wind = Number.isFinite(snapshot.wind) ? snapshot.wind : this.wind;
     this.message = snapshot.message === "VICTORY!"
       ? "DEFEAT"
       : snapshot.message === "DEFEAT"
@@ -991,7 +1261,10 @@ updateWorm(worm, dt, input = 0) {
   }
 
   updateGuestPresentation(dt) {
-    for (const worm of [this.player, this.enemy]) {
+    for (const worm of this.allWorms) {
+      worm.animTime += dt;
+      worm.blinkClock -= dt;
+      if (worm.blinkClock < -0.13) worm.blinkClock = 1.8 + Math.random() * 3.6;
       const target = worm._netTarget;
       if (!target) continue;
       const factor = 1 - Math.exp(-18 * dt);
@@ -1010,6 +1283,7 @@ updateWorm(worm, dt, input = 0) {
         : projectile.type === "bullet"
           ? 0
           : 70;
+      projectile.vx += this.wind * (projectile.type === "bullet" ? 0.12 : projectile.type === "rocket" ? 0.8 : 1.15) * dt;
       projectile.vy += gravity * dt;
       projectile.x += projectile.vx * dt;
       projectile.y += projectile.vy * dt;
@@ -1033,12 +1307,12 @@ updateWorm(worm, dt, input = 0) {
     }
     input = clamp(input, -1, 1);
     ropeDelta = clamp(ropeDelta, -1, 1);
-    if (this.localWorm.rope) {
+    if (this.localWorm?.rope) {
       if (this.keys.has("w") || this.keys.has("arrowup")) ropeDelta -= 1;
       if (this.keys.has("s") || this.keys.has("arrowdown")) ropeDelta += 1;
     }
-    const wantsJump = !this.localWorm.rope && (this.keys.has("w") || this.keys.has("arrowup"));
-    if (wantsJump && !this.jumpHeld && this.localWorm.grounded) this.jump();
+    const wantsJump = !this.localWorm?.rope && (this.keys.has("w") || this.keys.has("arrowup"));
+    if (wantsJump && !this.jumpHeld && this.localWorm?.grounded) this.jump();
     this.jumpHeld = wantsJump;
 
     if (this.networkRole === "guest") {
@@ -1052,7 +1326,32 @@ updateWorm(worm, dt, input = 0) {
     }
 
     if (this.networkRole === "host") this.updateNetworkHost(dt, input, ropeDelta);
-    else {
+    else if (this.gameMode === "classic") {
+      if (!this.turnResolving) {
+        this.turnTime = Math.max(0, this.turnTime - dt);
+        if (this.turnTime <= 0) this.turnResolving = true;
+      }
+      this.updateAI(dt);
+      for (const worm of this.allWorms) {
+        const wormInput = worm === this.player && this.turnTeam === "player" && !this.turnResolving
+          ? input
+          : worm === this.enemy && this.turnTeam === "enemy" && !this.turnResolving
+            ? worm.aiMove ?? 0
+            : 0;
+        this.updateWorm(worm, dt, wormInput);
+        if (wormInput) worm.facing = Math.sign(wormInput);
+      }
+      this.updateProjectiles(dt);
+      this.updateMeleeAttacks(dt);
+      this.updateFire(dt);
+      this.updateCrates(dt);
+      if (this.turnResolving && this.state === "playing") {
+        const actionFinished = this.projectiles.length === 0 && this.meleeAttacks.length === 0;
+        const bodiesSettled = this.allWorms.every((worm) => !worm.alive || (Math.abs(worm.vx) < 8 && Math.abs(worm.vy) < 12));
+        this.turnSettleTime = actionFinished && bodiesSettled ? this.turnSettleTime + dt : 0;
+        if (this.turnSettleTime > 1.1) this.endTurn();
+      }
+    } else {
       this.adjustRope(this.player, ropeDelta, dt);
       this.updateWorm(this.player, dt, input);
       if (input) this.player.facing = Math.sign(input);
@@ -1068,6 +1367,10 @@ updateWorm(worm, dt, input = 0) {
         particle.vy += 300 * dt;
         particle.x += particle.vx * dt;
         particle.y += particle.vy * dt;
+      } else if (particle.type === "text") {
+        particle.x += particle.vx * dt;
+        particle.y += particle.vy * dt;
+        particle.vy += 35 * dt;
       }
       return particle.life > 0;
     });
@@ -1110,65 +1413,107 @@ updateWorm(worm, dt, input = 0) {
 
   drawWorm(worm) {
     const context = this.context;
+    if (!worm.alive && (worm.deathTime ?? 0) <= 0) return;
     if (worm.invulnerable > 0 && Math.floor(worm.invulnerable * 30) % 2) return;
+    const isActive = this.gameMode !== "classic" || worm === (this.turnTeam === "player" ? this.player : this.enemy);
+    const hurt = clamp((worm.hurtTime ?? 0) / 0.58, 0, 1);
+    const airborne = !worm.grounded;
+    const crawl = worm.animTime * 9 + worm.x * 0.04;
+    const breathing = Math.sin(worm.animTime * 3.2) * 0.035;
+    const squash = worm.squash ?? 0;
     context.save();
+    context.globalAlpha = worm.alive ? 1 : clamp((worm.deathTime ?? 0) / 1.7, 0, 1);
     context.translate(worm.x, worm.y);
-    if (worm.hurtTime > 0) {
-      const wobble = Math.sin(worm.hurtTime * 38);
+    context.rotate(worm.bodyAngle ?? 0);
+    if (hurt > 0) {
+      const wobble = Math.sin(worm.hurtTime * 42);
       context.rotate(worm.hurtTilt * wobble);
-      context.scale(1 + Math.abs(wobble) * 0.18, 1 - Math.abs(wobble) * 0.14);
+      context.scale(1 + Math.abs(wobble) * 0.22, 1 - Math.abs(wobble) * 0.2);
     }
+    context.scale(1 + squash * 0.24 + breathing, 1 - squash * 0.22 - breathing * 0.5);
     context.fillStyle = "rgba(8,10,24,.28)";
     context.beginPath();
-    context.ellipse(0, 18, 18, 6, 0, 0, TAU);
+    context.ellipse(-worm.facing * 2, 18, airborne ? 11 : 21, airborne ? 3 : 5, 0, 0, TAU);
     context.fill();
+
+    // Tapered, curved body: three overlapping segments read as a soft worm, not a ball.
+    const tailWave = airborne ? Math.sin(crawl) * 5 : Math.sin(crawl) * Math.min(4, Math.abs(worm.vx) / 35);
+    const segments = [
+      { x: -worm.facing * 15, y: 10 + tailWave, rx: 9, ry: 8 },
+      { x: -worm.facing * 8, y: 6 - tailWave * 0.25, rx: 12, ry: 12 },
+      { x: 0, y: 1, rx: 16, ry: 17 },
+    ];
     context.fillStyle = worm.color;
     context.strokeStyle = "#171525";
-    context.lineWidth = 4;
+    context.lineWidth = 3.5;
+    for (const segment of segments) {
+      context.beginPath();
+      context.ellipse(segment.x, segment.y, segment.rx, segment.ry, -worm.facing * 0.15, 0, TAU);
+      context.fill();
+      context.stroke();
+    }
+    // A lighter belly makes the flexible silhouette easier to read.
+    context.fillStyle = "rgba(255,255,255,.16)";
     context.beginPath();
-    context.arc(0, 2, worm.radius, 0, TAU);
+    context.ellipse(-worm.facing * 4, 8, 8, 4, 0, 0, TAU);
     context.fill();
-    context.stroke();
-    context.fillStyle = worm.color;
-    context.beginPath();
-    context.arc(-worm.facing * 8, 11, 11, 0, TAU);
-    context.fill();
-    context.stroke();
+
     context.fillStyle = "white";
+    const blinking = worm.blinkClock < 0;
     context.beginPath();
-    context.arc(worm.facing * 6, -5, 5, 0, TAU);
+    context.ellipse(worm.facing * 5, -5, 5, blinking ? 1.1 : 5.5, 0, 0, TAU);
     context.fill();
     context.fillStyle = "#171525";
-    context.beginPath();
-    context.arc(worm.facing * 8, -5, 2.3, 0, TAU);
-    context.fill();
-    if (worm.hurtTime > 0) {
+    if (worm.alive && !blinking && hurt <= 0.25) {
+      context.beginPath();
+      context.arc(worm.facing * 7, -5, 2.2, 0, TAU);
+      context.fill();
+    } else if (hurt > 0.25 || !worm.alive) {
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(worm.facing * 2, -9);
+      context.lineTo(worm.facing * 9, -2);
+      context.moveTo(worm.facing * 9, -9);
+      context.lineTo(worm.facing * 2, -2);
+      context.stroke();
+    }
+    if (hurt > 0) {
       context.strokeStyle = "#171525";
       context.lineWidth = 2.5;
       context.beginPath();
       context.arc(worm.facing * 4, 5, 5, Math.PI * 1.1, Math.PI * 1.9);
       context.stroke();
+    } else {
+      context.fillStyle = "rgba(255,255,255,.35)";
+      context.beginPath();
+      context.arc(worm.facing * 10, 2, 2.4, 0, TAU);
+      context.fill();
     }
-    context.strokeStyle = worm.color;
-    context.lineWidth = 5;
-    context.beginPath();
-    context.moveTo(0, 8);
-    context.lineTo(-worm.facing * 11, 17);
-    context.stroke();
     context.restore();
+
+    if (!worm.alive) return;
     context.textAlign = "center";
     context.font = "900 11px Rubik, sans-serif";
-    context.fillStyle = "rgba(16,20,39,.72)";
-    roundedRect(context, worm.x - 28, worm.y - 42, 56, 20, 8);
+    context.fillStyle = isActive ? "rgba(16,20,39,.9)" : "rgba(16,20,39,.62)";
+    roundedRect(context, worm.x - 31, worm.y - 43, 62, 20, 8);
     context.fill();
     context.fillStyle = worm.color;
     context.fillText(`${worm.hp} HP`, worm.x, worm.y - 28);
-    if (worm.hurtTime > 0) {
+    if (isActive && this.gameMode === "classic") {
+      context.fillStyle = "#fff3ad";
+      context.beginPath();
+      context.moveTo(worm.x, worm.y - 49);
+      context.lineTo(worm.x - 5, worm.y - 57);
+      context.lineTo(worm.x + 5, worm.y - 57);
+      context.closePath();
+      context.fill();
+    }
+    if (hurt > 0) {
       context.fillStyle = "#fff3ad";
       context.font = "900 13px Rubik, sans-serif";
       const wobble = Math.sin(worm.hurtTime * 32) * 5;
-      context.fillText("✦", worm.x - 22 + wobble, worm.y - 17);
-      context.fillText("✧", worm.x + 23 - wobble, worm.y - 12);
+      context.fillText("✦", worm.x - 23 + wobble, worm.y - 17);
+      context.fillText("✧", worm.x + 24 - wobble, worm.y - 12);
     }
     if (worm.rope) {
       context.strokeStyle = "rgba(255,255,255,.8)";
@@ -1186,31 +1531,69 @@ updateWorm(worm, dt, input = 0) {
 
   drawHud() {
     const context = this.context;
-    const drawHealth = (worm, x, align) => {
+    const drawHealth = (team, active, x, align) => {
+      const living = team.filter((worm) => worm.alive);
+      const hp = living.reduce((total, worm) => total + worm.hp, 0);
       context.textAlign = align;
       context.fillStyle = "rgba(21,20,37,.86)";
       roundedRect(context, align === "left" ? x : x - 215, 18, 215, 58, 15);
       context.fill();
-      context.fillStyle = worm.color;
+      context.fillStyle = active.color;
       context.font = "800 17px Rubik, sans-serif";
-      context.fillText(`${worm.name}  ${worm.hp} HP`, x + (align === "left" ? 14 : -14), 43);
+      const title = this.gameMode === "classic" ? `${active.team === "player" ? "PINK" : "BLUE"}  ${hp} HP` : `${active.name}  ${active.hp} HP`;
+      context.fillText(title, x + (align === "left" ? 14 : -14), 43);
       context.fillStyle = "#9478ff";
       context.font = "700 12px Rubik, sans-serif";
-      context.fillText(`ARMOR ${worm.armor}`, x + (align === "left" ? 14 : -14), 62);
+      if (this.gameMode === "classic") {
+        const startX = align === "left" ? x + 16 : x - 16;
+        living.forEach((worm, index) => {
+          context.fillStyle = worm === active ? "#fff3ad" : worm.color;
+          context.beginPath();
+          context.arc(startX + (align === "left" ? 1 : -1) * index * 18, 59, worm === active ? 5 : 4, 0, TAU);
+          context.fill();
+        });
+      } else {
+        context.fillText(`ARMOR ${active.armor}`, x + (align === "left" ? 14 : -14), 62);
+      }
     };
-    drawHealth(this.player, 18, "left");
-    drawHealth(this.enemy, 942, "right");
+    drawHealth(this.playerTeam, this.player, 18, "left");
+    drawHealth(this.enemyTeam, this.enemy, 942, "right");
     context.textAlign = "center";
     context.fillStyle = "rgba(21,20,37,.75)";
-    roundedRect(context, 430, 22, 100, 38, 13);
+    roundedRect(context, 424, 18, 112, 62, 13);
     context.fill();
+    context.fillStyle = this.gameMode === "classic" && this.turnTime < 8 ? "#ff668c" : "white";
+    context.font = "900 20px Rubik, sans-serif";
+    const clock = this.gameMode === "classic"
+      ? String(Math.ceil(this.turnTime)).padStart(2, "0")
+      : `${Math.floor(this.time / 60)}:${String(Math.floor(this.time % 60)).padStart(2, "0")}`;
+    context.fillText(clock, 480, 44);
+    context.fillStyle = "#b7f34a";
+    context.font = "800 10px Rubik, sans-serif";
+    context.fillText(this.gameMode === "classic" ? `TURN ${this.turnNumber}` : "REAL TIME", 480, 62);
+
+    const windLength = Math.abs(this.wind) * 0.38;
+    context.strokeStyle = "rgba(255,255,255,.72)";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(480, 91);
+    context.lineTo(480 + Math.sign(this.wind) * windLength, 91);
+    context.stroke();
     context.fillStyle = "white";
-    context.font = "800 15px Rubik, sans-serif";
-    context.fillText(`${Math.floor(this.time / 60)}:${String(Math.floor(this.time % 60)).padStart(2, "0")}`, 480, 47);
+    context.beginPath();
+    const tipX = 480 + Math.sign(this.wind) * windLength;
+    context.moveTo(tipX, 91);
+    context.lineTo(tipX - Math.sign(this.wind) * 7, 87);
+    context.lineTo(tipX - Math.sign(this.wind) * 7, 95);
+    context.closePath();
+    context.fill();
+    context.font = "800 9px Rubik, sans-serif";
+    context.fillText(`WIND ${Math.round(Math.abs(this.wind))}`, 480, 106);
   }
 
   drawControls() {
     const context = this.context;
+    const controlsEnabled = this.canControl(this.localWorm);
     const movePointer = [...this.pointers.values()].find((pointer) => pointer.side === "move");
     const aimPointer = [...this.pointers.values()].find((pointer) => pointer.side === "aim");
     const drawPad = (x, y, radius, pointer, color) => {
@@ -1231,7 +1614,7 @@ updateWorm(worm, dt, input = 0) {
       context.fill();
     };
 
-    context.globalAlpha = 0.8;
+    context.globalAlpha = controlsEnabled ? 0.8 : 0.28;
     drawPad(95, 425, 58, movePointer, "rgba(255,255,255,.26)");
     drawPad(765, 425, 58, aimPointer, "rgba(99,220,255,.38)");
 
@@ -1262,7 +1645,10 @@ updateWorm(worm, dt, input = 0) {
     context.fillText(this.localWorm.rope ? "MOVE / LENGTH" : "MOVE", 95, 501);
     context.fillText("AIM", 765, 501);
     context.globalAlpha = 1;
-    if (this.state === "playing") {
+    if (controlsEnabled) {
+      context.save();
+      context.translate((960 - 960 * WORLD_ZOOM) / 2, 22);
+      context.scale(WORLD_ZOOM, WORLD_ZOOM);
       context.strokeStyle = "rgba(255,255,255,.55)";
       context.setLineDash([7, 7]);
       context.beginPath();
@@ -1271,6 +1657,14 @@ updateWorm(worm, dt, input = 0) {
       context.lineTo(worm.x + Math.cos(worm.aim) * 78, worm.y + Math.sin(worm.aim) * 78);
       context.stroke();
       context.setLineDash([]);
+      context.restore();
+    } else if (this.gameMode === "classic" && this.state === "playing") {
+      context.fillStyle = "rgba(21,20,37,.72)";
+      roundedRect(context, 400, 466, 160, 34, 12);
+      context.fill();
+      context.fillStyle = "white";
+      context.font = "800 12px Rubik, sans-serif";
+      context.fillText(this.turnResolving ? "RESOLVING..." : "BOT IS THINKING...", 480, 488);
     }
   }
 
@@ -1304,6 +1698,9 @@ updateWorm(worm, dt, input = 0) {
       context.fill();
     }
     if (this.state === "maps") return;
+    context.save();
+    context.translate((960 - 960 * WORLD_ZOOM) / 2, 22);
+    context.scale(WORLD_ZOOM, WORLD_ZOOM);
     this.drawTerrain();
     const lava = context.createLinearGradient(0, 512, 0, 540);
     lava.addColorStop(0, "rgba(255,210,72,.95)");
@@ -1369,8 +1766,7 @@ updateWorm(worm, dt, input = 0) {
       context.closePath();
       context.fill();
     }
-    this.drawWorm(this.player);
-    this.drawWorm(this.enemy);
+    for (const worm of this.allWorms) this.drawWorm(worm);
     for (const attack of this.meleeAttacks) {
       const progress = clamp(attack.age / attack.duration, 0, 1);
       const swing = attack.angle - 1.15 + progress * 2.3;
@@ -1393,6 +1789,10 @@ updateWorm(worm, dt, input = 0) {
         context.moveTo(particle.x, particle.y);
         context.lineTo(particle.x2, particle.y2);
         context.stroke();
+      } else if (particle.type === "text") {
+        context.font = "900 15px Rubik, sans-serif";
+        context.textAlign = "center";
+        context.fillText(particle.text, particle.x, particle.y);
       } else {
         context.beginPath();
         context.arc(particle.x, particle.y, 3, 0, TAU);
@@ -1400,6 +1800,7 @@ updateWorm(worm, dt, input = 0) {
       }
     }
     context.globalAlpha = 1;
+    context.restore();
     this.drawHud();
     this.drawControls();
     if (this.messageTime > 0) {

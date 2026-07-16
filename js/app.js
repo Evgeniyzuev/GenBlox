@@ -953,7 +953,7 @@ function openSoloGame(gameId) {
   mode = "solo";
   if (activeGameId === "worms") {
     setupGameShell();
-    elements.wormsStatus.textContent = "Choose one of three maps";
+    elements.wormsStatus.textContent = "Choose a mode and arena";
     openOverlay(elements.gameDialog, "game");
     wormsGame?.destroy();
     wormsGame = new WormsGame(elements.wormsStage, {

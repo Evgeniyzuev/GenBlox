@@ -928,6 +928,32 @@ button.durak-card:disabled { opacity: .45; }
 .worms-map-heading { grid-column: 1 / -1; display: grid; gap: 5px; text-align: center; }
 .worms-map-heading small { color: var(--lime); font-size: 10px; font-weight: 900; letter-spacing: 2px; }
 .worms-map-heading strong { font-size: clamp(20px, 4vw, 38px); }
+.worms-mode-choice {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: min(680px, 100%);
+  margin: 4px auto 2px;
+}
+.worms-mode-choice button {
+  display: grid;
+  gap: 3px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: inherit;
+  background: rgba(255,255,255,.04);
+  cursor: pointer;
+  text-align: left;
+}
+.worms-mode-choice button.is-selected {
+  border-color: var(--lime);
+  background: rgba(183,243,74,.12);
+  box-shadow: inset 0 0 0 1px rgba(183,243,74,.45);
+}
+.worms-mode-choice strong { font-size: 13px; }
+.worms-mode-choice small { color: var(--muted); font-size: 9px; }
 .worms-map-button {
   display: grid;
   grid-template-rows: 1fr auto auto;
@@ -1735,6 +1761,7 @@ footer { padding: 28px 20px; border-top: 1px solid var(--line); color: var(--mut
   .worms-toolbar span { display: none; }
   .worms-map-choice { padding: 12px 26px; }
   .worms-map-button { min-height: 112px; }
+  .worms-mode-choice button { padding: 6px 10px; }
   .micro-map-choice { padding: 12px 26px; }
   .micro-map-button { min-height: 112px; }
   .wave-hud { top: 42px; grid-template-columns: repeat(5, auto); gap: 4px; }
