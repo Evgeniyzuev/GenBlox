@@ -6,6 +6,7 @@ import { WormsGame } from "../js/games/worms.js";
 function logicGame(mode = "classic") {
   const game = Object.create(WormsGame.prototype);
   game.gameMode = mode;
+  game.worldWidth = 960;
   game.networkRole = "solo";
   game.state = "playing";
   game.wind = 0;
@@ -113,7 +114,7 @@ test("classic team scene renders without depending on a single-worm duel", () =>
   game.enemyTeam = [game.createWorm(840, "blue", "B1", "enemy"), game.createWorm(700, "blue", "B2", "enemy")];
   [game.player, game.enemy] = [game.playerTeam[0], game.enemyTeam[0]];
   game.playerTeam.concat(game.enemyTeam).forEach((worm) => { worm.y = 320; });
-  game.terrainCanvas = {};
+  game.terrainCanvas = { width: game.worldWidth };
   game.terrainDirty = false;
   game.projectiles = [];
   game.meleeAttacks = [];
@@ -206,4 +207,31 @@ test("bat launches hard while finger shoves by about one worm diameter", () => {
   fingerGame.updateMeleeAttacks(0.05);
   assert.ok(fingerTarget.x - startX >= fingerTarget.radius * 1.8);
   assert.ok(fingerTarget.x - startX <= fingerTarget.radius * 2);
+});
+
+test("map sides are open and an off-map grenade cannot enter an escape loop", () => {
+  const game = logicGame();
+  game.playerTeam = [game.createWorm(100, "pink", "P1", "player")];
+  game.enemyTeam = [game.createWorm(800, "blue", "B1", "enemy")];
+  [game.player, game.enemy] = [game.playerTeam[0], game.enemyTeam[0]];
+  game.projectiles = [{
+    type: "grenade", owner: game.player, x: game.worldWidth + 2, y: 300,
+    vx: 20, vy: 0, life: 2, radius: 7,
+  }];
+
+  assert.equal(game.isTerrainSolid(-1, 300), false);
+  assert.equal(game.isTerrainSolid(game.worldWidth, 300), false);
+  assert.doesNotThrow(() => game.updateProjectiles(0.016));
+  assert.equal(game.projectiles.length, 0);
+});
+
+test("classic terrain supports the wider team map", () => {
+  const game = logicGame();
+  game.worldWidth = 1280;
+
+  game.terrain = game.createTerrain("canyon");
+
+  assert.equal(game.terrain.length, 1280 * 540);
+  assert.equal(game.terrainSurface.length, 1280);
+  assert.ok(game.viewScale < 0.86);
 });

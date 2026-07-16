@@ -4,6 +4,9 @@ const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const TURN_DURATION = 35;
 const WORLD_ZOOM = 0.86;
 const TEAM_SIZE = 5;
+const CANVAS_WIDTH = 960;
+const WORLD_HEIGHT = 540;
+const CLASSIC_WORLD_WIDTH = 1280;
 
 const WEAPONS = [
   { id: "pistol", icon: "⌁", label: "Pistol", ammo: 8 },
@@ -149,6 +152,8 @@ export class WormsGame {
     this.mapChoice.hidden = true;
     this.toolbar.hidden = false;
     this.time = 0;
+    this.worldWidth = this.gameMode === "classic" && this.networkRole === "solo" ? CLASSIC_WORLD_WIDTH : CANVAS_WIDTH;
+    this.terrainCanvas = null;
     this.wind = (Math.random() * 2 - 1) * 92;
     this.turnTeam = "player";
     this.turnNumber = 1;
@@ -169,8 +174,9 @@ export class WormsGame {
     this.messageTime = 1.2;
     this.terrain = this.createTerrain(mapId);
     if (this.gameMode === "classic" && this.networkRole === "solo") {
-      const playerSpawns = Array.from({ length: TEAM_SIZE }, (_, index) => 80 + index * 180);
-      const enemySpawns = Array.from({ length: TEAM_SIZE }, (_, index) => 170 + index * 180);
+      const slotGap = (this.worldWidth - 160) / (TEAM_SIZE * 2 - 1);
+      const playerSpawns = Array.from({ length: TEAM_SIZE }, (_, index) => 80 + index * slotGap * 2);
+      const enemySpawns = Array.from({ length: TEAM_SIZE }, (_, index) => 80 + (index * 2 + 1) * slotGap);
       const occupied = [];
       const spawnTeam = (spawns, color, prefix, team) => spawns.map((preferredX, index) => {
         const x = this.findSafeSpawn(preferredX, occupied);
@@ -213,8 +219,8 @@ export class WormsGame {
     return {
       x, y: 100, vx: 0, vy: 0, radius: 16, color, name,
       team, hp: this.gameMode === "classic" ? 100 : 120, armor: 0, alive: true,
-      grounded: false, facing: x < 480 ? 1 : -1,
-      aim: x < 480 ? -0.35 : Math.PI + 0.35, cooldown: 0, invulnerable: 0,
+      grounded: false, facing: x < (this.worldWidth ?? CANVAS_WIDTH) / 2 ? 1 : -1,
+      aim: x < (this.worldWidth ?? CANVAS_WIDTH) / 2 ? -0.35 : Math.PI + 0.35, cooldown: 0, invulnerable: 0,
       lavaExposure: 0, fireExposure: 0, hurtTime: 0, hurtTilt: 0, animTime: Math.random() * 10,
       bodyAngle: 0, angularVelocity: 0, squash: 0, blinkClock: 1 + Math.random() * 3,
       ammo: Object.fromEntries(WEAPONS.map((item) => [item.id, item.ammo])),
@@ -230,45 +236,60 @@ export class WormsGame {
     return (team === "player" ? this.playerTeam : this.enemyTeam).filter((worm) => worm.alive && worm.hp > 0);
   }
 
+  get viewScale() {
+    return this.worldWidth > CANVAS_WIDTH ? Math.min(WORLD_ZOOM, 900 / this.worldWidth) : WORLD_ZOOM;
+  }
+
+  get viewOffsetX() {
+    return (CANVAS_WIDTH - this.worldWidth * this.viewScale) / 2;
+  }
+
+  get viewOffsetY() {
+    return this.worldWidth > CANVAS_WIDTH ? WORLD_HEIGHT - WORLD_HEIGHT * this.viewScale - 12 : 22;
+  }
+
   createTerrain(mapId) {
-    const terrain = new Uint8Array(960 * 540);
-    const surface = new Int16Array(960);
-    for (let x = 0; x < 960; x += 1) {
+    const width = this.worldWidth;
+    const horizontalScale = width / CANVAS_WIDTH;
+    const terrain = new Uint8Array(width * WORLD_HEIGHT);
+    const surface = new Int16Array(width);
+    for (let x = 0; x < width; x += 1) {
+      const mapX = x / horizontalScale;
       let y;
       if (mapId === "canyon") {
-        y = 355 + Math.sin(x / 80) * 34 + Math.sin(x / 29) * 11;
-        if (x > 390 && x < 570) y += 125 - Math.abs(x - 480) * 0.25;
+        y = 355 + Math.sin(mapX / 80) * 34 + Math.sin(mapX / 29) * 11;
+        if (mapX > 390 && mapX < 570) y += 125 - Math.abs(mapX - 480) * 0.25;
       } else if (mapId === "anthill") {
-        y = 370 - Math.sin(x / 105) * 65 - Math.sin(x / 37) * 19;
-        if (x > 405 && x < 555) y -= 55;
+        y = 370 - Math.sin(mapX / 105) * 65 - Math.sin(mapX / 37) * 19;
+        if (mapX > 405 && mapX < 555) y -= 55;
       } else {
-        y = 385 + Math.sin(x / 48) * 48;
-        if ((x > 245 && x < 340) || (x > 620 && x < 735)) y = 535;
+        y = 385 + Math.sin(mapX / 48) * 48;
+        if ((mapX > 245 && mapX < 340) || (mapX > 620 && mapX < 735)) y = 535;
       }
       surface[x] = clamp(Math.round(y), 250, 535);
-      for (let row = surface[x]; row < 540; row += 1) terrain[row * 960 + x] = 1;
+      for (let row = surface[x]; row < WORLD_HEIGHT; row += 1) terrain[row * width + x] = 1;
     }
 
     const carveCircle = (cx, cy, radius) => {
-      const minX = clamp(Math.floor(cx - radius), 0, 959);
-      const maxX = clamp(Math.ceil(cx + radius), 0, 959);
-      const minY = clamp(Math.floor(cy - radius), 0, 539);
-      const maxY = clamp(Math.ceil(cy + radius), 0, 539);
+      const minX = clamp(Math.floor(cx - radius), 0, width - 1);
+      const maxX = clamp(Math.ceil(cx + radius), 0, width - 1);
+      const minY = clamp(Math.floor(cy - radius), 0, WORLD_HEIGHT - 1);
+      const maxY = clamp(Math.ceil(cy + radius), 0, WORLD_HEIGHT - 1);
       for (let row = minY; row <= maxY; row += 1) {
         for (let column = minX; column <= maxX; column += 1) {
           if ((column - cx) ** 2 + (row - cy) ** 2 <= radius ** 2) {
-            terrain[row * 960 + column] = 0;
+            terrain[row * width + column] = 0;
           }
         }
       }
     };
 
     if (mapId === "anthill") {
-      for (let x = 90; x <= 870; x += 18) carveCircle(x, 410 + Math.sin(x / 75) * 18, 24);
-      for (let x = 170; x <= 790; x += 18) carveCircle(x, 474 + Math.sin(x / 58) * 12, 21);
+      for (let x = 90; x <= 870; x += 18) carveCircle(x * horizontalScale, 410 + Math.sin(x / 75) * 18, 24 * Math.min(1.2, horizontalScale));
+      for (let x = 170; x <= 790; x += 18) carveCircle(x * horizontalScale, 474 + Math.sin(x / 58) * 12, 21 * Math.min(1.2, horizontalScale));
       for (let y = 350; y <= 480; y += 17) {
-        carveCircle(285 + Math.sin(y / 22) * 8, y, 20);
-        carveCircle(675 + Math.cos(y / 25) * 8, y, 20);
+        carveCircle((285 + Math.sin(y / 22) * 8) * horizontalScale, y, 20 * Math.min(1.2, horizontalScale));
+        carveCircle((675 + Math.cos(y / 25) * 8) * horizontalScale, y, 20 * Math.min(1.2, horizontalScale));
       }
     }
     this.terrainSurface = surface;
@@ -279,9 +300,11 @@ export class WormsGame {
   isTerrainSolid(x, y) {
     const column = Math.round(x);
     const row = Math.round(y);
-    if (column < 0 || column >= 960 || row >= 540) return true;
+    // Horizontal space is open: worms and projectiles can fall off either edge.
+    if (column < 0 || column >= this.worldWidth) return false;
+    if (row >= WORLD_HEIGHT) return true;
     if (row < 0) return false;
-    return this.terrain[row * 960 + column] === 1;
+    return this.terrain[row * this.worldWidth + column] === 1;
   }
 
   isBlockSolid(x, y) {
@@ -303,7 +326,7 @@ circleHitsSolid(x, y, radius) {
     const py = y + Math.sin(angle) * testRadius;
     const col = Math.round(px);
     const row = Math.round(py);
-    if (col < 0 || col >= 960 || row >= 540) continue;
+    if (col < 0 || col >= this.worldWidth || row >= WORLD_HEIGHT) continue;
     if (row < 0) continue;
     if (this.isTerrainSolid(col, row) || this.isBlockSolid(px, py)) return true;
   }
@@ -314,7 +337,7 @@ circleHitsSolid(x, y, radius) {
     const py = y + radius * 0.9;
     const col = Math.round(px);
     const row = Math.round(py);
-    if (col < 0 || col >= 960 || row >= 540) continue;
+    if (col < 0 || col >= this.worldWidth || row >= WORLD_HEIGHT) continue;
     if (row < 0) continue;
     if (this.isTerrainSolid(col, row) || this.isBlockSolid(px, py)) return true;
   }
@@ -323,11 +346,12 @@ circleHitsSolid(x, y, radius) {
 }
 
 groundAt(x, startY = 0) {
-  const column = clamp(Math.round(x), 0, 959);
-  let ground = 540;
-  const startRow = clamp(Math.floor(startY), 0, 539);
-  for (let row = startRow; row < 540; row += 1) {
-    if (this.terrain[row * 960 + column]) {
+  if (x < 0 || x >= this.worldWidth) return WORLD_HEIGHT;
+  const column = Math.round(x);
+  let ground = WORLD_HEIGHT;
+  const startRow = clamp(Math.floor(startY), 0, WORLD_HEIGHT - 1);
+  for (let row = startRow; row < WORLD_HEIGHT; row += 1) {
+    if (this.terrain[row * this.worldWidth + column]) {
       ground = row;
       break;
     }
@@ -340,9 +364,9 @@ groundAt(x, startY = 0) {
   // Проверяем соседние колонки для более точного определения поверхности
   // Это помогает на крутых склонах
   for (let offset = -1; offset <= 1; offset += 1) {
-    const adjColumn = clamp(column + offset, 0, 959);
-    for (let row = Math.max(0, ground - 10); row < Math.min(540, ground + 10); row += 1) {
-      if (this.terrain[row * 960 + adjColumn]) {
+    const adjColumn = clamp(column + offset, 0, this.worldWidth - 1);
+    for (let row = Math.max(0, ground - 10); row < Math.min(WORLD_HEIGHT, ground + 10); row += 1) {
+      if (this.terrain[row * this.worldWidth + adjColumn]) {
         ground = Math.min(ground, row);
         break;
       }
@@ -354,12 +378,12 @@ groundAt(x, startY = 0) {
   findSafeSpawn(preferredX, occupied = []) {
     for (let offset = 0; offset <= 270; offset += 15) {
       for (const direction of offset === 0 ? [1] : [1, -1]) {
-        const x = clamp(preferredX + offset * direction, 24, 936);
+        const x = clamp(preferredX + offset * direction, 24, this.worldWidth - 24);
         const ground = this.groundAt(x);
         if (ground < 505 && occupied.every((taken) => Math.abs(taken - x) > 42)) return x;
       }
     }
-    return clamp(preferredX, 24, 936);
+    return clamp(preferredX, 24, this.worldWidth - 24);
   }
 
   get localWorm() {
@@ -570,7 +594,7 @@ groundAt(x, startY = 0) {
       this.crater(worm.x + direction.x * 30, worm.y + direction.y * 24, 18);
       worm.cooldown = 0.45;
     } else if (id === "block") {
-      const x = clamp(worm.x + direction.x * 52 - 22, 10, 906);
+      const x = clamp(worm.x + direction.x * 52 - 22, 10, this.worldWidth - 54);
       const y = Math.min(this.groundAt(x + 22, Math.max(0, worm.y - 20)) - 34, worm.y + direction.y * 58);
       this.blocks.push({ x, y, width: 44, height: 34, hp: 45, color: worm.color });
       worm.cooldown = 0.5;
@@ -581,7 +605,7 @@ groundAt(x, startY = 0) {
       }
       else {
         const length = 190;
-        const anchor = { x: clamp(worm.x + direction.x * length, 15, 945), y: clamp(worm.y + direction.y * length, 30, 490) };
+        const anchor = { x: clamp(worm.x + direction.x * length, 15, this.worldWidth - 15), y: clamp(worm.y + direction.y * length, 30, 490) };
         worm.rope = { ...anchor, length: distance(worm, anchor) };
       }
       worm.cooldown = 0.35;
@@ -664,14 +688,14 @@ groundAt(x, startY = 0) {
   }
 
   crater(x, y, radius) {
-    const minX = clamp(Math.floor(x - radius), 0, 959);
-    const maxX = clamp(Math.ceil(x + radius), 0, 959);
-    const minY = clamp(Math.floor(y - radius), 0, 539);
-    const maxY = clamp(Math.ceil(y + radius), 0, 539);
+    const minX = clamp(Math.floor(x - radius), 0, this.worldWidth - 1);
+    const maxX = clamp(Math.ceil(x + radius), 0, this.worldWidth - 1);
+    const minY = clamp(Math.floor(y - radius), 0, WORLD_HEIGHT - 1);
+    const maxY = clamp(Math.ceil(y + radius), 0, WORLD_HEIGHT - 1);
     for (let row = minY; row <= maxY; row += 1) {
       for (let column = minX; column <= maxX; column += 1) {
         if ((column - x) ** 2 + (row - y) ** 2 <= radius ** 2) {
-          this.terrain[row * 960 + column] = 0;
+          this.terrain[row * this.worldWidth + column] = 0;
         }
       }
     }
@@ -722,7 +746,7 @@ updateWorm(worm, dt, input = 0) {
   
   // Горизонтальное движение с улучшенной проверкой
   const oldX = worm.x;
-  const candidateX = clamp(worm.x + worm.vx * dt, worm.radius, 960 - worm.radius);
+  const candidateX = worm.x + worm.vx * dt;
   if (this.circleHitsSolid(candidateX, worm.y, worm.radius)) {
     let stepped = false;
     if (worm.grounded) {
@@ -838,7 +862,7 @@ updateWorm(worm, dt, input = 0) {
   } else {
     worm.lavaExposure = 0;
   }
-  if (worm.y > 560) {
+  if (worm.y > 560 || worm.x < -worm.radius * 2 || worm.x > this.worldWidth + worm.radius * 2) {
     this.killWorm(worm);
   }
 }
@@ -856,11 +880,16 @@ updateWorm(worm, dt, input = 0) {
       projectile.vy += gravity * dt;
       projectile.x += projectile.vx * dt;
       projectile.y += projectile.vy * dt;
+      const leftWorld = projectile.x < 0 || projectile.x > this.worldWidth;
+      if (leftWorld) return false;
       const touchesSolid = this.isTerrainSolid(projectile.x, projectile.y + projectile.radius)
         || this.isBlockSolid(projectile.x, projectile.y + projectile.radius);
       if (projectile.type === "grenade" && touchesSolid) {
-        while (this.isTerrainSolid(projectile.x, projectile.y + projectile.radius)
-          || this.isBlockSolid(projectile.x, projectile.y + projectile.radius)) projectile.y -= 1;
+        for (let escapeStep = 0; escapeStep < WORLD_HEIGHT + 80; escapeStep += 1) {
+          if (!this.isTerrainSolid(projectile.x, projectile.y + projectile.radius)
+            && !this.isBlockSolid(projectile.x, projectile.y + projectile.radius)) break;
+          projectile.y -= 1;
+        }
         projectile.vy *= -0.48;
         projectile.vx *= 0.72;
       }
@@ -875,7 +904,7 @@ updateWorm(worm, dt, input = 0) {
         return false;
       }
       if (projectile.type === "bullet"
-        && (projectile.life <= 0 || projectile.x < 0 || projectile.x > 960 || projectile.y < 0 || projectile.y > 540)) {
+        && (projectile.life <= 0 || projectile.y < 0 || projectile.y > WORLD_HEIGHT)) {
         return false;
       }
       if (projectile.type === "molotov" && (target || touchesGround || projectile.life <= 0)) {
@@ -884,7 +913,7 @@ updateWorm(worm, dt, input = 0) {
         return false;
       }
       const hitGround = projectile.type === "rocket" && touchesGround;
-      const expired = projectile.life <= 0 || projectile.x < 0 || projectile.x > 960 || projectile.y > 540;
+      const expired = projectile.life <= 0 || projectile.y > WORLD_HEIGHT;
       if (target || hitGround || expired) {
         this.explode(projectile.x, projectile.y, projectile.type === "rocket" ? 58 : 52, projectile.type === "rocket" ? 38 : 34);
         return false;
@@ -929,7 +958,7 @@ updateWorm(worm, dt, input = 0) {
   shoveWorm(worm, direction, pixels) {
     const stepDirection = Math.sign(direction) || 1;
     for (let step = 0; step < pixels; step += 1) {
-      const nextX = clamp(worm.x + stepDirection, worm.radius, 960 - worm.radius);
+      const nextX = worm.x + stepDirection;
       if (!this.circleHitsSolid(nextX, worm.y, worm.radius)) {
         worm.x = nextX;
         continue;
@@ -950,11 +979,11 @@ updateWorm(worm, dt, input = 0) {
   }
 
   ignite(x, y) {
-    let cursor = clamp(x, 15, 945);
+    let cursor = clamp(x, 15, this.worldWidth - 15);
     const scanY = Math.max(0, y - 22);
     const direction = this.groundAt(cursor - 18, scanY) > this.groundAt(cursor + 18, scanY) ? -1 : 1;
     for (let index = 0; index < 9; index += 1) {
-      cursor = clamp(cursor + direction * 18, 10, 950);
+      cursor = clamp(cursor + direction * 18, 10, this.worldWidth - 10);
       this.firePatches.push({
         x: cursor,
         y: this.groundAt(cursor, scanY) - 3,
@@ -1046,7 +1075,7 @@ updateWorm(worm, dt, input = 0) {
     const desiredRange = weapon === "bat" || weapon === "finger" ? 42 : weapon === "molotov" ? 150 : 260;
     let destinationX = bot.x;
     let bestScore = -Infinity;
-    for (let x = clamp(bot.x - 210, 24, 936); x <= clamp(bot.x + 210, 24, 936); x += 30) {
+    for (let x = clamp(bot.x - 210, 24, this.worldWidth - 24); x <= clamp(bot.x + 210, 24, this.worldWidth - 24); x += 30) {
       const y = this.groundAt(x) - bot.radius;
       const range = Math.abs(target.x - x);
       const heightAdvantage = target.y - y;
@@ -1095,7 +1124,7 @@ updateWorm(worm, dt, input = 0) {
         x += vx * 0.045;
         y += vy * 0.045;
         miss = Math.min(miss, Math.hypot(x - target.x, y - target.y));
-        if (this.isTerrainSolid(x, y) || x < 0 || x > 960 || y > 540) break;
+        if (this.isTerrainSolid(x, y) || x < 0 || x > this.worldWidth || y > WORLD_HEIGHT) break;
       }
       if (miss < best.miss) best = { angle, miss };
     }
@@ -1105,7 +1134,7 @@ updateWorm(worm, dt, input = 0) {
   updateCrates(dt) {
     this.crateClock -= dt;
     if (this.crateClock <= 0 && this.crates.length < 2) {
-      const x = 130 + Math.random() * 700;
+      const x = 100 + Math.random() * (this.worldWidth - 200);
       this.crates.push({ x, y: -20, vy: 0, type: ["health", "armor", "ammo"][Math.floor(Math.random() * 3)] });
       this.crateClock = 28 + Math.random() * 10;
       this.message = "SUPPLIES!";
@@ -1434,19 +1463,20 @@ updateWorm(worm, dt, input = 0) {
 
   drawTerrain() {
     const context = this.context;
-    if (!this.terrainCanvas) {
+    if (!this.terrainCanvas || this.terrainCanvas.width !== this.worldWidth) {
       this.terrainCanvas = document.createElement("canvas");
-      this.terrainCanvas.width = 960;
-      this.terrainCanvas.height = 540;
+      this.terrainCanvas.width = this.worldWidth;
+      this.terrainCanvas.height = WORLD_HEIGHT;
+      this.terrainDirty = true;
     }
     if (this.terrainDirty) {
       const terrainContext = this.terrainCanvas.getContext("2d");
-      const image = terrainContext.createImageData(960, 540);
-      for (let y = 0; y < 540; y += 1) {
-        for (let x = 0; x < 960; x += 1) {
-          if (!this.terrain[y * 960 + x]) continue;
-          const offset = (y * 960 + x) * 4;
-          const edge = y < 4 || !this.terrain[(y - 3) * 960 + x];
+      const image = terrainContext.createImageData(this.worldWidth, WORLD_HEIGHT);
+      for (let y = 0; y < WORLD_HEIGHT; y += 1) {
+        for (let x = 0; x < this.worldWidth; x += 1) {
+          if (!this.terrain[y * this.worldWidth + x]) continue;
+          const offset = (y * this.worldWidth + x) * 4;
+          const edge = y < 4 || !this.terrain[(y - 3) * this.worldWidth + x];
           const grain = ((x * 17 + y * 29) % 19) - 9;
           if (edge) {
             image.data[offset] = 214 + grain;
@@ -1703,8 +1733,8 @@ updateWorm(worm, dt, input = 0) {
     context.globalAlpha = 1;
     if (controlsEnabled) {
       context.save();
-      context.translate((960 - 960 * WORLD_ZOOM) / 2, 22);
-      context.scale(WORLD_ZOOM, WORLD_ZOOM);
+      context.translate(this.viewOffsetX, this.viewOffsetY);
+      context.scale(this.viewScale, this.viewScale);
       context.strokeStyle = "rgba(255,255,255,.55)";
       context.setLineDash([7, 7]);
       context.beginPath();
@@ -1755,19 +1785,19 @@ updateWorm(worm, dt, input = 0) {
     }
     if (this.state === "maps") return;
     context.save();
-    context.translate((960 - 960 * WORLD_ZOOM) / 2, 22);
-    context.scale(WORLD_ZOOM, WORLD_ZOOM);
+    context.translate(this.viewOffsetX, this.viewOffsetY);
+    context.scale(this.viewScale, this.viewScale);
     this.drawTerrain();
     const lava = context.createLinearGradient(0, 512, 0, 540);
     lava.addColorStop(0, "rgba(255,210,72,.95)");
     lava.addColorStop(0.32, "rgba(255,102,34,.94)");
     lava.addColorStop(1, "rgba(112,20,32,.98)");
     context.fillStyle = lava;
-    context.fillRect(0, 515, 960, 25);
+    context.fillRect(0, 515, this.worldWidth, 25);
     context.strokeStyle = "rgba(255,242,145,.9)";
     context.lineWidth = 3;
     context.beginPath();
-    for (let x = 0; x <= 960; x += 12) {
+    for (let x = 0; x <= this.worldWidth; x += 12) {
       const y = 515 + Math.sin(this.time * 2.4 + x / 35) * 2;
       if (x === 0) context.moveTo(x, y);
       else context.lineTo(x, y);
