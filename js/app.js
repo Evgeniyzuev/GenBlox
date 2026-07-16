@@ -1252,12 +1252,12 @@ function makeReversiMove(index) {
   }
 }
 
-function playDurakAction(action, cardId = null) {
+function playDurakAction(action, cardId = null, intent = null) {
   const game = mode === "solo" ? localGame : client?.getGameState(activeGameId);
   const side = mode === "solo" ? 0 : roomPlayerSide();
   if (!isDurakState(game) || side === null) return;
   let next = game;
-  if (action === "card") next = playDurakCard(game, cardId, side);
+  if (action === "card") next = playDurakCard(game, cardId, side, intent);
   if (action === "pass") next = passDurak(game, side);
   if (action === "take") next = takeDurak(game, side);
   if (next === game) return;
@@ -1302,7 +1302,7 @@ function queueComputerMove() {
       const action = chooseDurakBotAction(current, current.turn);
       if (!action) return;
       let next = current;
-      if (action.type === "card") next = playDurakCard(current, action.cardId, current.turn);
+      if (action.type === "card") next = playDurakCard(current, action.cardId, current.turn, action.intent);
       if (action.type === "pass") next = passDurak(current, current.turn);
       if (action.type === "take") next = takeDurak(current, current.turn);
       if (next === current) return;
@@ -1579,7 +1579,14 @@ function renderDurak(game, mySeat) {
     button.className = `durak-card ${card.suit === game.trump.suit ? "is-trump" : ""}`;
     button.textContent = cardText(card);
     button.disabled = !legalIds.has(card.id);
-    button.addEventListener("click", () => playDurakAction("card", card.id));
+    button.addEventListener("click", () => {
+      const canDefend = actions.defenseCardIds?.includes(card.id);
+      const canTransfer = actions.transferCardIds?.includes(card.id);
+      const intent = canDefend && canTransfer
+        ? (window.confirm("Beat with this card? Press Cancel to transfer the attack.") ? "defend" : "transfer")
+        : canDefend ? "defend" : canTransfer ? "transfer" : null;
+      playDurakAction("card", card.id, intent);
+    });
     hand.append(button);
   });
   table.append(hand);

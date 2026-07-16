@@ -281,12 +281,16 @@ export function createDurakGame(previous = null, rawOptions = null) {
 
 export function getDurakActions(game, playerIndex) {
   if (!isDurakState(game) || game.winner !== null || playerIndex === null) {
-    return { cards: [], canTake: false, canPass: false };
+    return { cards: [], defenseCardIds: [], transferCardIds: [], canTake: false, canPass: false };
   }
   if (playerIndex === game.defender && game.turn === playerIndex) {
     const pair = game.table.find((entry) => !entry.defense);
+    const defenseCards = pair ? legalDefenseCards(game, pair.attack, playerIndex) : [];
+    const transferCards = pair ? legalTransferCards(game, playerIndex) : [];
     return {
-      cards: pair ? [...legalDefenseCards(game, pair.attack, playerIndex), ...legalTransferCards(game, playerIndex)] : [],
+      cards: [...new Map([...defenseCards, ...transferCards].map((card) => [card.id, card])).values()],
+      defenseCardIds: defenseCards.map((card) => card.id),
+      transferCardIds: transferCards.map((card) => card.id),
       canTake: game.table.some((entry) => !entry.defense),
       canPass: false,
     };
@@ -301,7 +305,7 @@ export function getDurakActions(game, playerIndex) {
   return { cards: [], canTake: false, canPass: false };
 }
 
-export function playDurakCard(game, cardId, playerIndex) {
+export function playDurakCard(game, cardId, playerIndex, intent = null) {
   if (!isDurakState(game) || game.winner !== null || game.turn !== playerIndex) return game;
   const players = game.players.map((player) => ({ ...player, hand: [...player.hand] }));
   const hand = players[playerIndex]?.hand ?? [];
@@ -327,7 +331,9 @@ export function playDurakCard(game, cardId, playerIndex) {
   }
 
   const target = game.table.find((pair) => !pair.defense);
-  if (target && legalTransferCards(game, playerIndex).some((legal) => legal.id === cardId)) {
+  const canTransfer = target && legalTransferCards(game, playerIndex).some((legal) => legal.id === cardId);
+  const canDefend = target && canBeat(target.attack, card, game.trump.suit);
+  if (canTransfer && intent !== "defend") {
     const newDefender = nextActive(game, playerIndex);
     players[playerIndex].hand = hand.filter((candidate) => candidate.id !== cardId);
     return {
@@ -337,7 +343,7 @@ export function playDurakCard(game, cardId, playerIndex) {
       selectedAttack: card.id, passedThrowers: [], revision: game.revision + 1,
     };
   }
-  if (!target || !canBeat(target.attack, card, game.trump.suit)) return game;
+  if (!canDefend || intent === "transfer") return game;
   players[playerIndex].hand = hand.filter((candidate) => candidate.id !== cardId);
   const table = game.table.map((pair) => pair.attack.id === target.attack.id ? { ...pair, defense: card } : pair);
   const defended = {
@@ -348,6 +354,7 @@ export function playDurakCard(game, cardId, playerIndex) {
     revision: game.revision + 1,
   };
 
+  if (table.some((pair) => !pair.defense)) return { ...defended, turn: playerIndex };
   return players[playerIndex].hand.length === 0 ? completeDefense(defended) : afterSuccessfulDefense(defended, playerIndex);
 }
 
@@ -379,7 +386,9 @@ export function chooseDurakBotAction(game, playerIndex) {
   const actions = getDurakActions(game, playerIndex);
   if (actions.cards.length) {
     const sorted = [...actions.cards].sort((a, b) => rankValue(a.rank) - rankValue(b.rank));
-    return { type: "card", cardId: sorted[0].id };
+    const cardId = sorted[0].id;
+    const canDefend = actions.defenseCardIds?.includes(cardId);
+    return { type: "card", cardId, intent: canDefend ? "defend" : "transfer" };
   }
   if (actions.canPass) return { type: "pass" };
   if (actions.canTake) return { type: "take" };
