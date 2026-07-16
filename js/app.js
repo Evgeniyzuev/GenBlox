@@ -49,6 +49,9 @@ import { WaveRunnersGame } from "./games/wave-runners.js";
 import { FantasyLanesGame } from "./games/fantasy-lanes.js";
 import { initCreator } from "./creator/creator-controller.js";
 import { normalizeCreatorGameId, validateCreatorStateWrite } from "./creator/multiplayer.js";
+import { parseGenBloxFile } from "./creator/genblox-format.js";
+import { assembleCreatorRoomSource, createCreatorRoomDelivery } from "./creator/room-delivery.js";
+import { CreatorRoomRuntime } from "./creator/room-runtime.js";
 
 const GAMES = {
   "tic-tac-toe": {
@@ -223,6 +226,9 @@ const elements = {
   partyCode: $("#party-code"),
   partyPlayers: $("#party-players"),
   gameDialog: $("#game-dialog"),
+  creatorRoomGameView: $("#creator-room-game-view"),
+  creatorRoomStatus: $("#creator-room-status"),
+  creatorRoomFrame: $("#creator-room-frame"),
   gameKicker: $("#game-kicker"),
   gameTitle: $("#game-title"),
   openHelp: $("#open-game-help"),
@@ -279,6 +285,9 @@ let wormsGame = null;
 let microGame = null;
 let waveGame = null;
 let fantasyGame = null;
+let creatorRoomRuntime = null;
+let creatorRoomSessionId = null;
+let creatorRoomStatusTimer = null;
 let playerProfile = loadPlayerProfile();
 let lastPublishedProfile = "";
 let pendingDurakOptions = null;
@@ -358,13 +367,15 @@ function publicProfileForPlayer(player, fallbackName = "Player") {
   return { id: String(player?.id ?? "unknown"), name: safe.name, avatar: safe.avatar, isLocal: player?.id === client?.playerId };
 }
 
-function creatorMultiplayerSnapshot(templateId) {
+function creatorMultiplayerSnapshot(templateId, playerLimit = client?.maxPlayers ?? 4) {
   if (!client?.started) return null;
   const gameId = normalizeCreatorGameId(templateId);
   const record = client.getGameState(gameId);
-  const players = client.players.slice(0, client.maxPlayers).map((player, index) => publicProfileForPlayer(player, index === 0 ? "Room Host" : `Player ${index + 1}`));
+  const limit = Number.isInteger(playerLimit) ? Math.max(1, Math.min(playerLimit, client.maxPlayers)) : client.maxPlayers;
+  const players = client.players.slice(0, limit).map((player, index) => publicProfileForPlayer(player, index === 0 ? "Room Host" : `Player ${index + 1}`));
   if (!players.some((player) => player.id === client.playerId) && client.localPlayer) {
     players.unshift(publicProfileForPlayer(client.localPlayer, playerProfile.name));
+    players.splice(limit);
   }
   return {
     connected: true,
@@ -389,6 +400,49 @@ function setCreatorMultiplayerState(templateId, key, value) {
     updatedBy: client.playerId,
     revision: (Number(previous?.revision) || 0) + 1,
   });
+}
+
+function launchCreatorRoomGame({ source, game }) {
+  if (!client?.started) throw new Error("Join or create a room first.");
+  const delivery = createCreatorRoomDelivery(source, game.manifest);
+  delivery.chunks.forEach((chunk, index) => {
+    client.setGameState(`creator-room:chunk:${index}`, {
+      sessionId: delivery.meta.sessionId,
+      index,
+      source: chunk,
+    });
+  });
+  client.setGameState(normalizeCreatorGameId(delivery.meta.sessionId), {
+    kind: "creator-preview",
+    values: {},
+    revision: 1,
+  });
+  const revision = (client.getRoomState()?.revision ?? 0) + 1;
+  client.setRoomState({
+    screen: "game",
+    activeGame: "creator-room",
+    creatorGame: delivery.meta,
+    startedAt: Date.now(),
+    revision,
+  });
+}
+
+function readCreatorRoomSource(meta) {
+  if (!Number.isInteger(meta?.chunkCount) || meta.chunkCount < 1 || meta.chunkCount > 64) {
+    throw new Error("The room game metadata is invalid.");
+  }
+  const chunks = Array.from({ length: meta.chunkCount }, (_, index) => client.getGameState(`creator-room:chunk:${index}`));
+  return assembleCreatorRoomSource(meta, chunks);
+}
+
+function setCreatorRoomStatus(message, isError = false) {
+  clearTimeout(creatorRoomStatusTimer);
+  elements.creatorRoomStatus.hidden = false;
+  elements.creatorRoomStatus.textContent = message;
+  elements.creatorRoomStatus.classList.toggle("is-error", isError);
+  if (!isError && (message === "Room game connected." || message.startsWith("Game finished."))) {
+    creatorRoomStatusTimer = setTimeout(() => { elements.creatorRoomStatus.hidden = true; }, 1800);
+  }
 }
 
 function playerByIndex(index) {
@@ -475,6 +529,12 @@ function destroyRealtimeGames() {
     fantasyGame.destroy();
     fantasyGame = null;
   }
+  if (creatorRoomRuntime) {
+    creatorRoomRuntime.destroy();
+    creatorRoomRuntime = null;
+  }
+  clearTimeout(creatorRoomStatusTimer);
+  creatorRoomSessionId = null;
 }
 
 function showRealtimeUnavailable(stage, title, message) {
@@ -652,11 +712,69 @@ function startRoomSync() {
   syncTimer = setInterval(syncRoom, 120);
 }
 
+function setupCreatorRoomShell(meta) {
+  destroyRealtimeGames();
+  activeGameId = "creator-room";
+  configuredGameId = "creator-room";
+  elements.gameKicker.textContent = "YOUR ROOM GAME";
+  elements.gameTitle.textContent = meta?.title || "User Game";
+  elements.helpTitle.textContent = `About: ${meta?.title || "User Game"}`;
+  const help = document.createElement("p");
+  help.textContent = "This game was created from a GenBlox TXT file and is running in a network-isolated sandbox.";
+  elements.helpContent.replaceChildren(help);
+  elements.classicGameView.hidden = true;
+  elements.wormsGameView.hidden = true;
+  elements.microGameView.hidden = true;
+  elements.waveGameView.hidden = true;
+  elements.fantasyGameView.hidden = true;
+  elements.creatorRoomGameView.hidden = false;
+  elements.gameDialog.classList.remove("is-worms", "is-micro", "is-wave", "is-fantasy");
+  elements.gameDialog.classList.add("is-creator-room");
+  setCreatorRoomStatus("Downloading the room game…");
+}
+
+function syncCreatorRoom(room) {
+  const meta = room?.creatorGame;
+  mode = "room";
+  if (!meta?.sessionId) {
+    setupCreatorRoomShell(null);
+    openOverlay(elements.gameDialog, "game");
+    setCreatorRoomStatus("The room game metadata is missing.", true);
+    return;
+  }
+  if (configuredGameId !== "creator-room" || creatorRoomSessionId !== meta.sessionId) setupCreatorRoomShell(meta);
+  openOverlay(elements.gameDialog, "game");
+
+  if (!creatorRoomRuntime) {
+    try {
+      const source = readCreatorRoomSource(meta);
+      const game = parseGenBloxFile(source);
+      if (game.manifest.templateId !== meta.templateId) throw new Error("The room game identity did not pass validation.");
+      creatorRoomRuntime = new CreatorRoomRuntime(elements.creatorRoomFrame, {
+        onStateWrite: (key, value) => setCreatorMultiplayerState(meta.sessionId, key, value),
+        onStatus: setCreatorRoomStatus,
+      });
+      creatorRoomSessionId = meta.sessionId;
+      creatorRoomRuntime.load(game, creatorMultiplayerSnapshot(meta.sessionId, meta.maxPlayers));
+    } catch (error) {
+      const waiting = error?.message === "The room game is still downloading.";
+      setCreatorRoomStatus(error.message, !waiting);
+      return;
+    }
+  }
+  creatorRoomRuntime.sync(creatorMultiplayerSnapshot(meta.sessionId, meta.maxPlayers));
+}
+
 function syncRoom() {
   if (!client?.started) return;
   renderParty();
   const room = client.getRoomState();
   if (room?.activeGame) room.activeGame = normalizeGameId(room.activeGame);
+
+  if (room?.screen === "game" && room.activeGame === "creator-room") {
+    syncCreatorRoom(room);
+    return;
+  }
 
   if (room?.screen === "game" && GAMES[room.activeGame]) {
     const expectedCells = room.activeGame === "checkers" || room.activeGame === "reversi"
@@ -903,6 +1021,7 @@ function setupGameShell() {
   const isMicro = activeGameId === "micromachines";
   const isWave = activeGameId === "wave-runners";
   const isFantasy = activeGameId === "fantasy-lanes";
+  elements.creatorRoomGameView.hidden = true;
   elements.classicGameView.hidden = isWorms || isMicro || isWave || isFantasy;
   elements.wormsGameView.hidden = !isWorms;
   elements.microGameView.hidden = !isMicro;
@@ -912,6 +1031,7 @@ function setupGameShell() {
   elements.gameDialog.classList.toggle("is-micro", isMicro);
   elements.gameDialog.classList.toggle("is-wave", isWave);
   elements.gameDialog.classList.toggle("is-fantasy", isFantasy);
+  elements.gameDialog.classList.remove("is-creator-room");
   elements.board.setAttribute("aria-label", `${game.title} board`);
   elements.scoreboard.hidden = activeGameId === "durak";
   elements.markX.textContent = activeGameId === "checkers" ? "●" : "×";
@@ -1838,6 +1958,7 @@ initCreator({
   multiplayer: {
     getSnapshot: creatorMultiplayerSnapshot,
     setState: setCreatorMultiplayerState,
+    launch: launchCreatorRoomGame,
   },
 });
 

@@ -247,6 +247,7 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
 .creator-steps { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }.creator-steps article { position: relative; padding: 22px; border: 1px solid var(--line); background: var(--panel); }.creator-steps article>span { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: var(--bg); background: var(--lime); font-weight: 900; }.creator-steps h3 { margin: 12px 0 6px; }.creator-steps p,.creator-history p { color: var(--muted); line-height: 1.45; }.creator-steps article>div { display: flex; flex-wrap: wrap; gap: 8px; }.creator-upload { display: inline-block; padding: 12px 18px; color: var(--bg); background: var(--cyan); cursor: pointer; font-weight: 800; }.creator-upload input { display: none; }
 .creator-ai-links { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 14px; }.creator-ai-links a { padding: 7px 9px; border: 1px solid rgba(99,220,255,.35); color: var(--cyan); background: rgba(99,220,255,.07); text-decoration: none; font-size: 12px; font-weight: 800; }.creator-ai-links a:hover { border-color: var(--cyan); }
 .creator-template-label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 800; }.creator-steps select { width: 100%; margin-bottom: 12px; padding: 11px; border: 1px solid var(--line); color: var(--ink); background: var(--panel-2); font: inherit; }
+.creator-launch-room { background: var(--cyan); box-shadow: 5px 5px #347487; }
 .creator-safety { padding: 13px 16px; border-left: 4px solid var(--pink); background: rgba(255,102,140,.08); }
 .creator-sdk-help { margin: 0 0 18px; padding: 12px 14px; border: 1px solid rgba(148,120,255,.4); background: rgba(148,120,255,.07); }.creator-sdk-help summary { cursor: pointer; color: #d4cbff; font-weight: 800; }.creator-sdk-help p { margin: 10px 0 0; color: var(--muted); line-height: 1.55; }.creator-sdk-help code { color: var(--lime); }
 .creator-workspace { display: grid; grid-template-columns: .85fr 1.15fr; gap: 18px; }.creator-editor,.creator-player { min-width: 0; padding: 18px; border: 1px solid var(--line); background: var(--panel); }.creator-editor label { display: block; margin-bottom: 8px; font-weight: 800; }.creator-editor textarea { width: 100%; height: 430px; resize: vertical; border: 1px solid var(--line); padding: 14px; color: #e9e5ff; background: #11101d; font: 12px/1.45 ui-monospace,monospace; }.creator-editor-actions { display: flex; gap: 8px; margin-top: 10px; }.creator-status { min-height: 24px; color: var(--lime); line-height: 1.4; }.creator-status[data-kind="error"] { color: var(--pink); }.creator-editor details { padding: 10px; color: var(--muted); background: #11101d; }.creator-player-heading { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 10px; }.creator-player-heading small { color: var(--muted); }.creator-player iframe { width: 100%; height: 520px; border: 1px solid var(--line); background: #fff; }
@@ -266,6 +267,22 @@ dialog::backdrop { background: rgba(8,7,16,.82); backdrop-filter: blur(6px); }
   -webkit-user-select: none;
   user-select: none;
 }
+#game-dialog.is-creator-room {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  background: #11101d;
+}
+#game-dialog.is-creator-room .game-shell { display: grid; grid-template-rows: auto minmax(0,1fr); width: 100%; height: 100dvh; padding: 0; }
+#game-dialog.is-creator-room .game-header { position: relative; z-index: 3; align-items: center; padding: max(10px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) 10px max(14px,env(safe-area-inset-left)); background: rgba(17,16,29,.96); }
+#creator-room-game-view { position: relative; min-height: 0; }
+#creator-room-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.creator-room-status { position: absolute; z-index: 2; top: 8px; left: 50%; margin: 0; padding: 7px 12px; color: #171525; background: var(--lime); transform: translateX(-50%); pointer-events: none; }
+.creator-room-status.is-error { color: #fff; background: var(--pink); }
 .game-header-actions { display: flex; gap: 8px; }
 .icon-button { width: 42px; height: 42px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; font-size: 25px; }
 .room-info { display: flex; justify-content: space-between; margin: 22px 0 12px; color: var(--muted); font-size: 12px; }

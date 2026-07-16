@@ -52,6 +52,8 @@ index.html                       разметка экрана и игры
 styles.css                       весь визуальный слой
 js/app.js                        контроллер каталога, комнаты и активной игры
 js/core/playroom-client.js       единственная граница с PlayroomKit
+js/creator/room-delivery.js      доставка и проверка TXT внутри комнаты
+js/creator/room-runtime.js       sandbox-запуск пользовательской игры у участников
 js/games/tic-tac-toe.js          правила крестиков-ноликов
 js/games/checkers.js             правила русских шашек
 ```

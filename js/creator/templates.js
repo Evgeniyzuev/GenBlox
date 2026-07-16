@@ -3,6 +3,10 @@ import { serializeGenBloxFile } from "./genblox-format.js";
 export const AI_PROMPT = `This is a GenBlox game file.
 Change the game as I describe, but keep all section markers.
 Return the complete file as plain text without Markdown fences.
+For multiplayer, set manifest mode to "multiplayer" and maxPlayers to 2-4.
+Use only GenBlox.getPlayer(), getPlayers(), isHost(), isMultiplayer(), getState(key), setState(key,value), onStateChange(callback), and onPlayersChange(callback).
+The host should initialize small JSON-safe shared state, and every player should render new state received by onStateChange.
+Do not use localStorage, external URLs, imports, fetch, or WebSocket.
 
 My idea: make the player collect stars and add three difficulty levels.`;
 
